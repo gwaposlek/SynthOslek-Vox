@@ -87,6 +87,22 @@
       width: 100%; height: 64px; background: #06080c;
       border-radius: 4px; border: 1px solid #1e293b; display: block; margin-top: 6px;
     }
+    .peak-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    }
+    .peak-row .peak-label {
+      font-size: 10px; color: var(--muted); width: 40px; letter-spacing: 1px;
+      text-transform: uppercase; font-weight: 600;
+    }
+    .peak-track {
+      flex: 1; height: 6px; background: #1e293b;
+      border-radius: 3px; overflow: hidden; position: relative;
+    }
+    #peakBar {
+      height: 100%; width: 0%;
+      background: var(--accent);
+      transition: width 0.06s linear, background 0.15s linear;
+    }
 
     #keyboard {
       position: relative; height: 90px; margin-top: 4px;
@@ -140,7 +156,11 @@
   <div class="card" style="margin-bottom: 12px;">
     <label>Live Input Scope</label>
     <canvas id="scope"></canvas>
-    <div class="hint">Raw microphone signal, tapped pre-DSP.</div>
+    <div class="peak-row">
+      <div class="peak-label">Peak</div>
+      <div class="peak-track"><div id="peakBar"></div></div>
+    </div>
+    <div class="hint">Raw microphone signal, tapped pre-DSP. Keep peak below the amber zone for headroom.</div>
   </div>
 
   <div class="grid four">
@@ -168,8 +188,13 @@
       <button id="autoTuneBtn" class="toggle">OFF</button>
     </div>
     <div class="card">
-      <label>Stereo Width</label>
-      <input type="range" id="spreadGain" min="0" max="1" step="0.05" value="0.7">
+      <label>A4 Reference</label>
+      <select id="a4Ref">
+        <option value="415">415 Hz (Baroque)</option>
+        <option value="432">432 Hz</option>
+        <option value="440" selected>440 Hz (Standard)</option>
+        <option value="444">444 Hz</option>
+      </select>
     </div>
   </div>
 
@@ -193,6 +218,18 @@
     </div>
   </div>
 
+  <div class="grid">
+    <div class="card">
+      <label>Stereo Width</label>
+      <input type="range" id="spreadGain" min="0" max="1" step="0.05" value="0.7">
+    </div>
+    <div class="card">
+      <label>Harmony Humanize</label>
+      <button id="humanizeBtn" class="toggle on">ON</button>
+      <div class="sublabel">±3¢ detune + slight vibrato per voice</div>
+    </div>
+  </div>
+
   <div class="card">
     <label>Virtual MIDI Controller (Fallback)</label>
     <div id="keyboard"></div>
@@ -206,9 +243,6 @@
 <script>
 /* =========================================================================
    AUDIO WORKLET PROCESSOR
-   v5 changes vs v4:
-     - corrMap preallocated in constructor (no per-detection allocation)
-     - Pitch readout postMessage throttled to ~23 Hz (detection still ~94 Hz)
    ========================================================================= */
 const workletCode = `
 class VoxProcessor extends AudioWorkletProcessor {
@@ -219,32 +253,60 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.buffer = new Float32Array(this.bufSize);
     this.writeIdx = 0;
 
+    // Pitch detection
     this.pitchWinSize = 2048;
     this.pitchWindow = new Float32Array(this.pitchWinSize);
     this.linearWindow = new Float32Array(this.pitchWinSize);
     this.pitchWriteIdx = 0;
     this.pitchCounter = 0;
-    this.pitchInterval = 512;      // detect every ~10.6 ms @ 48k
+    this.pitchInterval = 512;
     this.postCounter = 0;
-    this.postDivider = 4;          // post readout every 4th detection ~23 Hz
-
-    // Preallocated correlation map — shared across all detectPitch calls
+    this.postDivider = 4;
     this.maxLag = Math.min(this.pitchWinSize - 2, Math.floor(sampleRate / 65));
     this.corrMap = new Float32Array(this.maxLag + 4);
-
     this.detectedPitch = 0;
     this.pitchConfidence = 0;
+    this.pitchLocked = false;
 
+    // Pitch shifting voices
     this.numVoices = 6;
+    this.numHarmony = this.numVoices - 1;
     this.grainSize = Math.round(sampleRate * 0.035);
     this.phases = new Float32Array(this.numVoices);
     this.currentRatios = new Float32Array(this.numVoices).fill(1);
     this.targetRatios = new Float32Array(this.numVoices).fill(1);
-
     for (let i = 0; i < this.numVoices; i++) {
       this.phases[i] = i / this.numVoices;
     }
 
+    // Voice allocation (stable)
+    this.voiceNotes = new Int16Array(this.numHarmony).fill(-1);
+    this.voiceFreq = new Float32Array(this.numHarmony);
+    this.voiceVel = new Float32Array(this.numHarmony);
+    this.voiceEnv = new Float32Array(this.numHarmony);
+    this.voiceEnvTarget = new Float32Array(this.numHarmony);
+
+    this.voiceAttack  = 0.0042;
+    this.voiceRelease = 0.0005;
+
+    // Humanize
+    this.humanizeOn = true;
+    this.humanizePhase = new Float32Array(this.numHarmony);
+    this.humanizeVibRate = new Float32Array(this.numHarmony);
+    this.humanizeDetune = new Float32Array(this.numHarmony);
+    this.humanizeMult = new Float32Array(this.numHarmony).fill(1);
+    for (let i = 0; i < this.numHarmony; i++) {
+      this.humanizePhase[i] = Math.random() * Math.PI * 2;
+      this.humanizeVibRate[i] = 4.8 + Math.random() * 0.8;
+      this.humanizeDetune[i] = (Math.random() - 0.5) * 6;
+    }
+
+    // Noise gate
+    this.gateThreshold = 0.008;
+    this.envFollower = 0;
+    this.gateGain = 0;
+
+    // Control state
     this.portamento = 0.03;
     this.key = 0;
     this.scaleType = 'major';
@@ -253,7 +315,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.harmonyGain = 0.6;
     this.spreadGain = 0.7;
     this.autoTuneOn = false;
-    this.harmonyNotes = [];
+    this.a4 = 440;
 
     this.scales = {
       major: [0, 2, 4, 5, 7, 9, 11],
@@ -266,7 +328,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (e) => {
       const d = e.data;
       switch (d.type) {
-        case 'midi':        this.harmonyNotes = d.notes; break;
+        case 'midi':        this.updateVoices(d.notes); break;
         case 'key':         this.key = d.key; break;
         case 'scale':       this.scaleType = d.scale; break;
         case 'autoTune':    this.autoTuneOn = d.on; break;
@@ -275,8 +337,49 @@ class VoxProcessor extends AudioWorkletProcessor {
         case 'harmonyGain': this.harmonyGain = d.value; break;
         case 'spreadGain':  this.spreadGain = d.value; break;
         case 'portamento':  this.portamento = d.value; break;
+        case 'a4':          this.a4 = d.value; break;
+        case 'humanize':    this.humanizeOn = d.on; break;
       }
     };
+  }
+
+  updateVoices(notes) {
+    const incoming = new Map();
+    for (const n of notes) incoming.set(n.note, n.vel);
+
+    for (let v = 0; v < this.numHarmony; v++) {
+      const held = this.voiceNotes[v];
+      if (held < 0) continue;
+      if (incoming.has(held)) {
+        this.voiceVel[v] = incoming.get(held) / 127;
+        this.voiceEnvTarget[v] = 1;
+      } else {
+        this.voiceEnvTarget[v] = 0;
+      }
+    }
+
+    for (const [note, vel] of incoming) {
+      let alreadyAssigned = false;
+      for (let v = 0; v < this.numHarmony; v++) {
+        if (this.voiceNotes[v] === note) { alreadyAssigned = true; break; }
+      }
+      if (alreadyAssigned) continue;
+
+      for (let v = 0; v < this.numHarmony; v++) {
+        if (this.voiceNotes[v] === -1) {
+          this.voiceNotes[v] = note;
+          this.voiceVel[v] = vel / 127;
+          this.voiceEnvTarget[v] = 1;
+          break;
+        }
+      }
+    }
+
+    for (let v = 0; v < this.numHarmony; v++) {
+      if (this.voiceEnvTarget[v] === 0 && this.voiceEnv[v] < 0.005) {
+        this.voiceNotes[v] = -1;
+      }
+    }
   }
 
   detectPitch() {
@@ -298,6 +401,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     if (rms < 0.005) {
       this.detectedPitch = 0;
       this.pitchConfidence = 0;
+      this.pitchLocked = false;
       return;
     }
 
@@ -306,7 +410,6 @@ class VoxProcessor extends AudioWorkletProcessor {
     const corrMap = this.corrMap;
 
     let bestLag = -1, bestCorr = 0;
-
     for (let lag = minLag; lag <= maxLag; lag += 1) {
       let c = 0, e1 = 0, e2 = 0;
       const count = N - lag;
@@ -320,7 +423,6 @@ class VoxProcessor extends AudioWorkletProcessor {
       if (v > bestCorr) { bestCorr = v; bestLag = lag; }
     }
 
-    // Sub-harmonic octave check
     if (bestCorr > 0.5 && bestLag > minLag * 2) {
       const halfLag = Math.round(bestLag / 2);
       let c = 0, e1 = 0, e2 = 0;
@@ -336,7 +438,11 @@ class VoxProcessor extends AudioWorkletProcessor {
       }
     }
 
-    if (bestCorr > 0.52 && bestLag > minLag && bestLag < maxLag) {
+    const threshold = this.pitchLocked ? 0.45 : 0.55;
+    const valid = bestCorr > threshold && bestLag > minLag && bestLag < maxLag;
+
+    if (valid) {
+      this.pitchLocked = true;
       const y0 = corrMap[bestLag - 1];
       const y1 = corrMap[bestLag];
       const y2 = corrMap[bestLag + 1];
@@ -348,14 +454,15 @@ class VoxProcessor extends AudioWorkletProcessor {
       this.detectedPitch = sampleRate / refinedLag;
       this.pitchConfidence = bestCorr;
     } else {
+      this.pitchLocked = false;
       this.detectedPitch = 0;
-      this.pitchConfidence = 0;
+      this.pitchConfidence = bestCorr;
     }
   }
 
   snapToScale(freq) {
     if (freq <= 0) return 0;
-    const midiFloat = 69 + 12 * Math.log2(freq / 440);
+    const midiFloat = 69 + 12 * Math.log2(freq / this.a4);
     const midiInt = Math.round(midiFloat);
     const activeScale = this.scales[this.scaleType] || this.scales.major;
     const noteInOct = ((midiInt % 12) + 12) % 12;
@@ -371,7 +478,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     if (diff > 6) diff -= 12;
     if (diff < -6) diff += 12;
 
-    return 440 * Math.pow(2, ((midiInt + diff) - 69) / 12);
+    return this.a4 * Math.pow(2, ((midiInt + diff) - 69) / 12);
   }
 
   readVoice(v, targetRatio) {
@@ -415,8 +522,33 @@ class VoxProcessor extends AudioWorkletProcessor {
     if (!input || !outputL) return true;
 
     const B = this.bufSize;
+    const blockSize = input.length;
 
-    for (let i = 0; i < input.length; i++) {
+    for (let v = 0; v < this.numHarmony; v++) {
+      if (this.voiceNotes[v] >= 0) {
+        this.voiceFreq[v] = this.a4 * Math.pow(2, (this.voiceNotes[v] - 69) / 12);
+      }
+    }
+
+    if (this.humanizeOn) {
+      const dPhase = 2 * Math.PI * blockSize / sampleRate;
+      for (let v = 0; v < this.numHarmony; v++) {
+        this.humanizePhase[v] += dPhase * this.humanizeVibRate[v];
+        if (this.humanizePhase[v] > Math.PI * 2) this.humanizePhase[v] -= Math.PI * 2;
+        const vibCents = Math.sin(this.humanizePhase[v]) * 2;
+        const cents = this.humanizeDetune[v] + vibCents;
+        this.humanizeMult[v] = Math.pow(2, cents / 1200);
+      }
+    } else {
+      for (let v = 0; v < this.numHarmony; v++) this.humanizeMult[v] = 1;
+    }
+
+    let activeHarmony = 0;
+    for (let v = 0; v < this.numHarmony; v++) {
+      if (this.voiceNotes[v] >= 0) activeHarmony++;
+    }
+
+    for (let i = 0; i < blockSize; i++) {
       const x = input[i];
 
       this.buffer[this.writeIdx] = x;
@@ -426,7 +558,6 @@ class VoxProcessor extends AudioWorkletProcessor {
       if (++this.pitchCounter >= this.pitchInterval) {
         this.pitchCounter = 0;
         this.detectPitch();
-        // Throttle the UI post — detection still runs at ~94 Hz
         if (++this.postCounter >= this.postDivider) {
           this.postCounter = 0;
           this.port.postMessage({
@@ -437,10 +568,23 @@ class VoxProcessor extends AudioWorkletProcessor {
         }
       }
 
+      for (let v = 0; v < this.numHarmony; v++) {
+        const tgt = this.voiceEnvTarget[v];
+        const cur = this.voiceEnv[v];
+        const coeff = tgt > cur ? this.voiceAttack : this.voiceRelease;
+        this.voiceEnv[v] = cur + (tgt - cur) * coeff;
+      }
+
+      const absX = x < 0 ? -x : x;
+      const envCoeff = absX > this.envFollower ? 0.01 : 0.0003;
+      this.envFollower += (absX - this.envFollower) * envCoeff;
+      const gateTarget = this.envFollower > this.gateThreshold ? 1 : 0;
+      const gateCoeff = gateTarget > this.gateGain ? 0.005 : 0.0005;
+      this.gateGain += (gateTarget - this.gateGain) * gateCoeff;
+
       let wetL = 0, wetR = 0;
       const havePitch = this.detectedPitch > 0;
 
-      // Auto-Tune voice — bypass granular path when input is already in tune
       if (this.autoTuneOn && havePitch) {
         const snapped = this.snapToScale(this.detectedPitch);
         const ratio = snapped / this.detectedPitch;
@@ -458,27 +602,30 @@ class VoxProcessor extends AudioWorkletProcessor {
         this.targetRatios[0] = 1;
       }
 
-      // MIDI Harmonies
-      if (havePitch && this.harmonyNotes.length > 0) {
-        const maxV = this.numVoices - 1;
-        const n = Math.min(this.harmonyNotes.length, maxV);
-        for (let k = 0; k < n; k++) {
-          const note = this.harmonyNotes[k];
-          const freq = 440 * Math.pow(2, (note - 69) / 12);
-          const ratio = freq / this.detectedPitch;
+      if (havePitch && activeHarmony > 0) {
+        let activeIdx = 0;
+        for (let v = 0; v < this.numHarmony; v++) {
+          if (this.voiceNotes[v] < 0) continue;
 
+          const ratio = (this.voiceFreq[v] / this.detectedPitch) * this.humanizeMult[v];
           if (ratio > 0.25 && ratio < 4.0) {
-            const vSamp = this.readVoice(k + 1, ratio) * this.harmonyGain;
-            const pan = (n > 1 ? (k / (n - 1) - 0.5) : 0) * this.spreadGain;
+            const gain = this.harmonyGain * this.voiceEnv[v] * this.voiceVel[v];
+            const vSamp = this.readVoice(v + 1, ratio) * gain;
+            const pan = (activeHarmony > 1
+              ? (activeIdx / (activeHarmony - 1) - 0.5)
+              : 0) * this.spreadGain;
             wetL += vSamp * (0.5 - pan);
             wetR += vSamp * (0.5 + pan);
           }
+          activeIdx++;
         }
       }
 
+      wetL *= this.gateGain;
+      wetR *= this.gateGain;
+
       let outL = x * this.dryGain + wetL;
       let outR = x * this.dryGain + wetR;
-
       outL = Math.tanh(outL);
       outR = Math.tanh(outR);
 
@@ -506,13 +653,15 @@ let audioCtx = null;
 let micStream = null;
 let workletNode = null;
 let analyserNode = null;
-const activeMidiNotes = new Set();
+const activeMidiNotes = new Map();
 const keyElements = new Map();
 const pointerNotes = new Map();
 
 const scopeCanvas = document.getElementById('scope');
 const scopeCtx = scopeCanvas.getContext('2d');
+const peakBar = document.getElementById('peakBar');
 let scopeData = null;
+let peakHold = 0;
 
 const els = {
   startBtn:      document.getElementById('startBtn'),
@@ -527,11 +676,13 @@ const els = {
   keySelect:     document.getElementById('keySelect'),
   scaleSelect:   document.getElementById('scaleSelect'),
   autoTuneBtn:   document.getElementById('autoTuneBtn'),
+  a4Ref:         document.getElementById('a4Ref'),
   dryGain:       document.getElementById('dryGain'),
   tuneGain:      document.getElementById('tuneGain'),
   harmonyGain:   document.getElementById('harmonyGain'),
   spreadGain:    document.getElementById('spreadGain'),
   portamento:    document.getElementById('portamento'),
+  humanizeBtn:   document.getElementById('humanizeBtn'),
   keyboard:      document.getElementById('keyboard'),
 };
 
@@ -592,7 +743,7 @@ function attachKeyEvents(el, midi) {
     ev.preventDefault();
     el.setPointerCapture(ev.pointerId);
     pointerNotes.set(ev.pointerId, midi);
-    dispatchNoteOn(midi);
+    dispatchNoteOn(midi, 100);
   });
   const endPointer = (ev) => {
     if (pointerNotes.has(ev.pointerId)) {
@@ -606,8 +757,8 @@ function attachKeyEvents(el, midi) {
   el.addEventListener('pointerleave', endPointer);
 }
 
-function dispatchNoteOn(midi) {
-  activeMidiNotes.add(midi);
+function dispatchNoteOn(midi, velocity) {
+  activeMidiNotes.set(midi, velocity);
   if (keyElements.has(midi)) keyElements.get(midi).classList.add('active');
   pushNotesToWorklet();
   updateNotesReadout();
@@ -621,13 +772,16 @@ function dispatchNoteOff(midi) {
 }
 
 function pushNotesToWorklet() {
-  if (workletNode) {
-    workletNode.port.postMessage({ type: 'midi', notes: Array.from(activeMidiNotes) });
+  if (!workletNode) return;
+  const notes = [];
+  for (const [note, vel] of activeMidiNotes) {
+    notes.push({ note, vel });
   }
+  workletNode.port.postMessage({ type: 'midi', notes });
 }
 
 function updateNotesReadout() {
-  const arr = Array.from(activeMidiNotes).sort((a, b) => a - b);
+  const arr = Array.from(activeMidiNotes.keys()).sort((a, b) => a - b);
   els.notesReadout.textContent = arr.length ? 'Held: ' + arr.map(midiName).join(' ') : 'Held: —';
 }
 
@@ -688,6 +842,8 @@ async function startEngine() {
   workletNode.port.postMessage({ type: 'harmonyGain', value: parseFloat(els.harmonyGain.value) });
   workletNode.port.postMessage({ type: 'spreadGain',  value: parseFloat(els.spreadGain.value) });
   workletNode.port.postMessage({ type: 'portamento',  value: glideToPortamento(parseFloat(els.portamento.value)) });
+  workletNode.port.postMessage({ type: 'a4',          value: parseFloat(els.a4Ref.value) });
+  workletNode.port.postMessage({ type: 'humanize',    on: els.humanizeBtn.classList.contains('on') });
 
   els.micDot.classList.add('active');
   els.micStatus.textContent = 'Microphone Active';
@@ -704,7 +860,8 @@ function updatePitchReadout(hz, conf) {
     els.noteReadout.textContent  = 'Note: --';
     return;
   }
-  const midiFloat = 69 + 12 * Math.log2(hz / 440);
+  const a4 = parseFloat(els.a4Ref.value) || 440;
+  const midiFloat = 69 + 12 * Math.log2(hz / a4);
   const midiInt = Math.round(midiFloat);
   const cents = Math.round((midiFloat - midiInt) * 100);
   els.pitchReadout.textContent = `Pitch: ${hz.toFixed(1)} Hz (conf ${conf.toFixed(2)})`;
@@ -719,6 +876,18 @@ function drawScope() {
   const h = scopeCanvas.height = scopeCanvas.clientHeight * (window.devicePixelRatio || 1);
 
   analyserNode.getFloatTimeDomainData(scopeData);
+
+  let peak = 0;
+  for (let i = 0; i < scopeData.length; i++) {
+    const a = Math.abs(scopeData[i]);
+    if (a > peak) peak = a;
+  }
+  peakHold = Math.max(peak, peakHold * 0.92);
+  const pct = Math.min(1, peakHold * 1.2);
+  peakBar.style.width = (pct * 100) + '%';
+  peakBar.style.background = pct > 0.85 ? 'var(--warn)'
+                          : pct > 0.6  ? '#ffcc00'
+                          : 'var(--accent)';
 
   scopeCtx.fillStyle = '#06080c';
   scopeCtx.fillRect(0, 0, w, h);
@@ -783,24 +952,52 @@ function handleMIDIMessage(msg) {
   const note = msg.data[1];
   const velocity = msg.data[2];
 
-  if (cmd === 0x90 && velocity > 0) dispatchNoteOn(note);
+  if (cmd === 0x90 && velocity > 0) dispatchNoteOn(note, velocity);
   else if (cmd === 0x80 || (cmd === 0x90 && velocity === 0)) dispatchNoteOff(note);
 }
 
-els.keySelect.addEventListener('change', (e) => workletNode && workletNode.port.postMessage({ type: 'key', key: parseInt(e.target.value) }));
-els.scaleSelect.addEventListener('change', (e) => workletNode && workletNode.port.postMessage({ type: 'scale', scale: e.target.value }));
+els.keySelect.addEventListener('change', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'key', key: parseInt(e.target.value) }));
+
+els.scaleSelect.addEventListener('change', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'scale', scale: e.target.value }));
+
 els.autoTuneBtn.addEventListener('click', () => {
   const on = !els.autoTuneBtn.classList.contains('on');
   els.autoTuneBtn.classList.toggle('on', on);
   els.autoTuneBtn.textContent = on ? 'ON' : 'OFF';
   if (workletNode) workletNode.port.postMessage({ type: 'autoTune', on });
 });
-els.dryGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'dryGain', value: parseFloat(e.target.value) }));
-els.tuneGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'tuneGain', value: parseFloat(e.target.value) }));
-els.harmonyGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'harmonyGain', value: parseFloat(e.target.value) }));
-els.spreadGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'spreadGain', value: parseFloat(e.target.value) }));
+
+els.humanizeBtn.addEventListener('click', () => {
+  const on = !els.humanizeBtn.classList.contains('on');
+  els.humanizeBtn.classList.toggle('on', on);
+  els.humanizeBtn.textContent = on ? 'ON' : 'OFF';
+  if (workletNode) workletNode.port.postMessage({ type: 'humanize', on });
+});
+
+els.a4Ref.addEventListener('change', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'a4', value: parseFloat(e.target.value) }));
+
+els.dryGain.addEventListener('input', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'dryGain', value: parseFloat(e.target.value) }));
+
+els.tuneGain.addEventListener('input', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'tuneGain', value: parseFloat(e.target.value) }));
+
+els.harmonyGain.addEventListener('input', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'harmonyGain', value: parseFloat(e.target.value) }));
+
+els.spreadGain.addEventListener('input', (e) =>
+  workletNode && workletNode.port.postMessage({ type: 'spreadGain', value: parseFloat(e.target.value) }));
+
 els.portamento.addEventListener('input', (e) => {
-  if (workletNode) workletNode.port.postMessage({ type: 'portamento', value: glideToPortamento(parseFloat(e.target.value)) });
+  if (workletNode) {
+    workletNode.port.postMessage({
+      type: 'portamento',
+      value: glideToPortamento(parseFloat(e.target.value))
+    });
+  }
 });
 
 buildKeyboard();
