@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SYNTHOSLEK VOX</title>
+  <style>
+    :root {
+      --bg: #0a0c10;
+      --card: #121620;
+      --inner: #0b0e14;
+      --accent: #00ffcc;
+      --accent-glow: rgba(0, 255, 204, 0.25);
+      --warn: #ff4772;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --line: #1e293b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; justify-content: center;
+      -webkit-user-select: none; user-select: none;
+    }
+    .container {
+      width: 100%; max-width: 760px; background: var(--card);
+      border-radius: 14px; padding: 24px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+      border: 1px solid var(--line);
+    }
+    .header-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 18px; border-bottom: 1px solid var(--line); padding-bottom: 12px;
+    }
+    h1 {
+      margin: 0; font-size: 24px; letter-spacing: 3px;
+      color: var(--accent); text-transform: uppercase;
+      text-shadow: 0 0 16px var(--accent-glow);
+    }
+    .badge {
+      font-size: 10px; background: #1e293b; padding: 4px 8px; border-radius: 4px;
+      color: var(--accent); border: 1px solid #334155; font-family: monospace;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .grid.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+    .card {
+      background: var(--inner); padding: 12px 14px; border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    label {
+      display: block; font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; font-weight: 600;
+    }
+    .sublabel {
+      font-size: 9px; color: var(--muted); text-transform: none;
+      letter-spacing: 0; margin-top: 2px;
+    }
+    select, button, input[type=range] {
+      width: 100%; padding: 8px 10px; background: #182030;
+      border: 1px solid #334155; color: #fff; border-radius: 6px;
+      font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.15s;
+    }
+    select:focus, button:focus { outline: none; border-color: var(--accent); }
+    input[type=range] { padding: 0; height: 24px; accent-color: var(--accent); }
+    button.primary {
+      background: var(--accent); color: #000; font-weight: 800;
+      border: none; letter-spacing: 1px; padding: 12px; font-size: 14px;
+    }
+    button.primary:disabled { opacity: 0.5; cursor: default; }
+    button.toggle.on { background: var(--accent); color: #000; font-weight: 800; }
+    .status-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #475569; margin-right: 6px; vertical-align: middle;
+    }
+    .status-dot.active {
+      background: var(--accent); box-shadow: 0 0 10px var(--accent);
+    }
+    .readout {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 12px; color: var(--accent); margin-top: 4px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+
+    canvas#scope {
+      width: 100%; height: 64px; background: #06080c;
+      border-radius: 4px; border: 1px solid #1e293b; display: block; margin-top: 6px;
+    }
+
+    #keyboard {
+      position: relative; height: 90px; margin-top: 4px;
+      touch-action: none;
+    }
+    .wk {
+      position: absolute; top: 0; bottom: 0;
+      background: linear-gradient(#f1f5f9, #cbd5e1);
+      border: 1px solid #334155; border-radius: 0 0 4px 4px; cursor: pointer;
+    }
+    .wk.active { background: linear-gradient(#7ff5dc, #34d3b3); }
+    .bk {
+      position: absolute; top: 0; height: 58%;
+      background: linear-gradient(#1e293b, #0f172a);
+      border: 1px solid #000; border-radius: 0 0 3px 3px; cursor: pointer; z-index: 2;
+    }
+    .bk.active { background: linear-gradient(#00ffcc, #009f80); }
+    .key-label {
+      position: absolute; bottom: 3px; left: 0; right: 0;
+      text-align: center; font-size: 8px; color: #64748b; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header-bar">
+    <h1>SYNTHOSLEK VOX</h1>
+    <span class="badge">ZERO-GC WORKLET DSP</span>
+  </div>
+
+  <div style="margin-bottom: 14px;">
+    <button id="startBtn" class="primary">START AUDIO ENGINE</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <label>Audio Input</label>
+      <div><span id="micDot" class="status-dot"></span><span id="micStatus" style="font-size: 12px;">Microphone Standby</span></div>
+      <div id="pitchReadout" class="readout">Pitch: -- Hz</div>
+      <div id="noteReadout" class="readout">Note: --</div>
+    </div>
+    <div class="card">
+      <label>Web MIDI Input</label>
+      <div><span id="midiDot" class="status-dot"></span><span id="midiStatus" style="font-size: 12px;">Searching Controller...</span></div>
+      <div id="notesReadout" class="readout">Held: —</div>
+      <div id="latencyReadout" class="readout">Latency: -- ms</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 12px;">
+    <label>Live Input Scope</label>
+    <canvas id="scope"></canvas>
+    <div class="hint">Raw microphone signal, tapped pre-DSP.</div>
+  </div>
+
+  <div class="grid four">
+    <div class="card">
+      <label>Key</label>
+      <select id="keySelect">
+        <option value="0">C</option><option value="1">C#</option><option value="2">D</option>
+        <option value="3">D#</option><option value="4">E</option><option value="5">F</option>
+        <option value="6">F#</option><option value="7">G</option><option value="8">G#</option>
+        <option value="9">A</option><option value="10">A#</option><option value="11">B</option>
+      </select>
+    </div>
+    <div class="card">
+      <label>Scale Mode</label>
+      <select id="scaleSelect">
+        <option value="major">Major</option>
+        <option value="minor">Minor</option>
+        <option value="pentatonic_maj">Pent. Major</option>
+        <option value="pentatonic_min">Pent. Minor</option>
+        <option value="chromatic">Chromatic</option>
+      </select>
+    </div>
+    <div class="card">
+      <label>Auto-Tune</label>
+      <button id="autoTuneBtn" class="toggle">OFF</button>
+    </div>
+    <div class="card">
+      <label>Stereo Width</label>
+      <input type="range" id="spreadGain" min="0" max="1" step="0.05" value="0.7">
+    </div>
+  </div>
+
+  <div class="grid four">
+    <div class="card">
+      <label>Dry Level</label>
+      <input type="range" id="dryGain" min="0" max="1" step="0.01" value="0.8">
+    </div>
+    <div class="card">
+      <label>Auto-Tune Level</label>
+      <input type="range" id="tuneGain" min="0" max="1" step="0.01" value="0.0">
+    </div>
+    <div class="card">
+      <label>Harmony Level</label>
+      <input type="range" id="harmonyGain" min="0" max="1" step="0.01" value="0.6">
+    </div>
+    <div class="card">
+      <label>Glide</label>
+      <input type="range" id="portamento" min="0" max="1" step="0.001" value="0.5">
+      <div class="sublabel">0 = instant · 1 = slow</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Virtual MIDI Controller (Fallback)</label>
+    <div id="keyboard"></div>
+  </div>
+
+  <div class="hint">
+    Tip: Connect a USB/Bluetooth MIDI keyboard or tap virtual keys. Hold keys while singing into your mic for multi-voice harmonies.
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   AUDIO WORKLET PROCESSOR
+   v5 changes vs v4:
+     - corrMap preallocated in constructor (no per-detection allocation)
+     - Pitch readout postMessage throttled to ~23 Hz (detection still ~94 Hz)
+   ========================================================================= */
+const workletCode = `
+class VoxProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+
+    this.bufSize = 65536;
+    this.buffer = new Float32Array(this.bufSize);
+    this.writeIdx = 0;
+
+    this.pitchWinSize = 2048;
+    this.pitchWindow = new Float32Array(this.pitchWinSize);
+    this.linearWindow = new Float32Array(this.pitchWinSize);
+    this.pitchWriteIdx = 0;
+    this.pitchCounter = 0;
+    this.pitchInterval = 512;      // detect every ~10.6 ms @ 48k
+    this.postCounter = 0;
+    this.postDivider = 4;          // post readout every 4th detection ~23 Hz
+
+    // Preallocated correlation map — shared across all detectPitch calls
+    this.maxLag = Math.min(this.pitchWinSize - 2, Math.floor(sampleRate / 65));
+    this.corrMap = new Float32Array(this.maxLag + 4);
+
+    this.detectedPitch = 0;
+    this.pitchConfidence = 0;
+
+    this.numVoices = 6;
+    this.grainSize = Math.round(sampleRate * 0.035);
+    this.phases = new Float32Array(this.numVoices);
+    this.currentRatios = new Float32Array(this.numVoices).fill(1);
+    this.targetRatios = new Float32Array(this.numVoices).fill(1);
+
+    for (let i = 0; i < this.numVoices; i++) {
+      this.phases[i] = i / this.numVoices;
+    }
+
+    this.portamento = 0.03;
+    this.key = 0;
+    this.scaleType = 'major';
+    this.dryGain = 0.8;
+    this.tuneGain = 0.0;
+    this.harmonyGain = 0.6;
+    this.spreadGain = 0.7;
+    this.autoTuneOn = false;
+    this.harmonyNotes = [];
+
+    this.scales = {
+      major: [0, 2, 4, 5, 7, 9, 11],
+      minor: [0, 2, 3, 5, 7, 8, 10],
+      pentatonic_maj: [0, 2, 4, 7, 9],
+      pentatonic_min: [0, 3, 5, 7, 10],
+      chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    };
+
+    this.port.onmessage = (e) => {
+      const d = e.data;
+      switch (d.type) {
+        case 'midi':        this.harmonyNotes = d.notes; break;
+        case 'key':         this.key = d.key; break;
+        case 'scale':       this.scaleType = d.scale; break;
+        case 'autoTune':    this.autoTuneOn = d.on; break;
+        case 'dryGain':     this.dryGain = d.value; break;
+        case 'tuneGain':    this.tuneGain = d.value; break;
+        case 'harmonyGain': this.harmonyGain = d.value; break;
+        case 'spreadGain':  this.spreadGain = d.value; break;
+        case 'portamento':  this.portamento = d.value; break;
+      }
+    };
+  }
+
+  detectPitch() {
+    const N = this.pitchWinSize;
+    for (let i = 0; i < N; i++) {
+      this.linearWindow[i] = this.pitchWindow[(this.pitchWriteIdx + i) % N];
+    }
+
+    let mean = 0;
+    for (let i = 0; i < N; i++) mean += this.linearWindow[i];
+    mean /= N;
+    let sumSq = 0;
+    for (let i = 0; i < N; i++) {
+      this.linearWindow[i] -= mean;
+      sumSq += this.linearWindow[i] * this.linearWindow[i];
+    }
+    const rms = Math.sqrt(sumSq / N);
+
+    if (rms < 0.005) {
+      this.detectedPitch = 0;
+      this.pitchConfidence = 0;
+      return;
+    }
+
+    const minLag = Math.floor(sampleRate / 800);
+    const maxLag = this.maxLag;
+    const corrMap = this.corrMap;
+
+    let bestLag = -1, bestCorr = 0;
+
+    for (let lag = minLag; lag <= maxLag; lag += 1) {
+      let c = 0, e1 = 0, e2 = 0;
+      const count = N - lag;
+      for (let i = 0; i < count; i += 2) {
+        const a = this.linearWindow[i], b = this.linearWindow[i + lag];
+        c += a * b; e1 += a * a; e2 += b * b;
+      }
+      const norm = Math.sqrt(e1 * e2) + 1e-12;
+      const v = c / norm;
+      corrMap[lag] = v;
+      if (v > bestCorr) { bestCorr = v; bestLag = lag; }
+    }
+
+    // Sub-harmonic octave check
+    if (bestCorr > 0.5 && bestLag > minLag * 2) {
+      const halfLag = Math.round(bestLag / 2);
+      let c = 0, e1 = 0, e2 = 0;
+      const count = N - halfLag;
+      for (let i = 0; i < count; i += 2) {
+        const a = this.linearWindow[i], b = this.linearWindow[i + halfLag];
+        c += a * b; e1 += a * a; e2 += b * b;
+      }
+      const vHalf = c / (Math.sqrt(e1 * e2) + 1e-12);
+      if (vHalf > 0.85 * bestCorr) {
+        bestLag = halfLag;
+        bestCorr = vHalf;
+      }
+    }
+
+    if (bestCorr > 0.52 && bestLag > minLag && bestLag < maxLag) {
+      const y0 = corrMap[bestLag - 1];
+      const y1 = corrMap[bestLag];
+      const y2 = corrMap[bestLag + 1];
+      const denom = 2 * (2 * y1 - y0 - y2);
+      let refinedLag = bestLag;
+      if (Math.abs(denom) > 1e-9) {
+        refinedLag = bestLag + (y2 - y0) / denom;
+      }
+      this.detectedPitch = sampleRate / refinedLag;
+      this.pitchConfidence = bestCorr;
+    } else {
+      this.detectedPitch = 0;
+      this.pitchConfidence = 0;
+    }
+  }
+
+  snapToScale(freq) {
+    if (freq <= 0) return 0;
+    const midiFloat = 69 + 12 * Math.log2(freq / 440);
+    const midiInt = Math.round(midiFloat);
+    const activeScale = this.scales[this.scaleType] || this.scales.major;
+    const noteInOct = ((midiInt % 12) + 12) % 12;
+    const rel = (noteInOct - this.key + 12) % 12;
+
+    let bestOff = 0, bestDist = 12;
+    for (const off of activeScale) {
+      let d = Math.abs(rel - off);
+      if (d > 6) d = 12 - d;
+      if (d < bestDist) { bestDist = d; bestOff = off; }
+    }
+    let diff = bestOff - rel;
+    if (diff > 6) diff -= 12;
+    if (diff < -6) diff += 12;
+
+    return 440 * Math.pow(2, ((midiInt + diff) - 69) / 12);
+  }
+
+  readVoice(v, targetRatio) {
+    this.targetRatios[v] = targetRatio;
+    const ratio = this.currentRatios[v];
+    const G = this.grainSize;
+    const B = this.bufSize;
+    const D0 = G * 1.5;
+
+    const diff = 1 - ratio;
+    const dir = diff >= 0 ? 1 : -1;
+    const phaseInc = Math.abs(diff) / G;
+
+    this.phases[v] = (this.phases[v] + phaseInc) % 1.0;
+
+    const phi1 = this.phases[v];
+    const phi2 = (phi1 + 0.5) % 1.0;
+
+    const d1 = D0 + (phi1 - 0.5) * G * dir;
+    const d2 = D0 + (phi2 - 0.5) * G * dir;
+
+    let pos1 = (this.writeIdx - d1) % B; if (pos1 < 0) pos1 += B;
+    let pos2 = (this.writeIdx - d2) % B; if (pos2 < 0) pos2 += B;
+
+    const i1 = Math.floor(pos1), f1 = pos1 - i1;
+    const i2 = Math.floor(pos2), f2 = pos2 - i2;
+
+    const s1 = this.buffer[i1] * (1 - f1) + this.buffer[(i1 + 1) % B] * f1;
+    const s2 = this.buffer[i2] * (1 - f2) + this.buffer[(i2 + 1) % B] * f2;
+
+    const w1 = 0.5 * (1 - Math.cos(2 * Math.PI * phi1));
+    const w2 = 0.5 * (1 - Math.cos(2 * Math.PI * phi2));
+
+    return s1 * w1 + s2 * w2;
+  }
+
+  process(inputs, outputs) {
+    const input = inputs[0] && inputs[0][0];
+    const outputL = outputs[0] && outputs[0][0];
+    const outputR = outputs[0] && outputs[0][1] ? outputs[0][1] : outputL;
+    if (!input || !outputL) return true;
+
+    const B = this.bufSize;
+
+    for (let i = 0; i < input.length; i++) {
+      const x = input[i];
+
+      this.buffer[this.writeIdx] = x;
+      this.pitchWindow[this.pitchWriteIdx] = x;
+      this.pitchWriteIdx = (this.pitchWriteIdx + 1) % this.pitchWinSize;
+
+      if (++this.pitchCounter >= this.pitchInterval) {
+        this.pitchCounter = 0;
+        this.detectPitch();
+        // Throttle the UI post — detection still runs at ~94 Hz
+        if (++this.postCounter >= this.postDivider) {
+          this.postCounter = 0;
+          this.port.postMessage({
+            type: 'pitch',
+            hz: this.detectedPitch,
+            conf: this.pitchConfidence
+          });
+        }
+      }
+
+      let wetL = 0, wetR = 0;
+      const havePitch = this.detectedPitch > 0;
+
+      // Auto-Tune voice — bypass granular path when input is already in tune
+      if (this.autoTuneOn && havePitch) {
+        const snapped = this.snapToScale(this.detectedPitch);
+        const ratio = snapped / this.detectedPitch;
+
+        if (Math.abs(ratio - 1) < 0.01) {
+          wetL += x * this.tuneGain;
+          wetR += x * this.tuneGain;
+          this.targetRatios[0] = 1;
+        } else {
+          const tuned = this.readVoice(0, ratio) * this.tuneGain;
+          wetL += tuned;
+          wetR += tuned;
+        }
+      } else {
+        this.targetRatios[0] = 1;
+      }
+
+      // MIDI Harmonies
+      if (havePitch && this.harmonyNotes.length > 0) {
+        const maxV = this.numVoices - 1;
+        const n = Math.min(this.harmonyNotes.length, maxV);
+        for (let k = 0; k < n; k++) {
+          const note = this.harmonyNotes[k];
+          const freq = 440 * Math.pow(2, (note - 69) / 12);
+          const ratio = freq / this.detectedPitch;
+
+          if (ratio > 0.25 && ratio < 4.0) {
+            const vSamp = this.readVoice(k + 1, ratio) * this.harmonyGain;
+            const pan = (n > 1 ? (k / (n - 1) - 0.5) : 0) * this.spreadGain;
+            wetL += vSamp * (0.5 - pan);
+            wetR += vSamp * (0.5 + pan);
+          }
+        }
+      }
+
+      let outL = x * this.dryGain + wetL;
+      let outR = x * this.dryGain + wetR;
+
+      outL = Math.tanh(outL);
+      outR = Math.tanh(outR);
+
+      outputL[i] = outL;
+      if (outputs[0][1]) outputs[0][1][i] = outR;
+
+      this.writeIdx = (this.writeIdx + 1) % B;
+
+      for (let v = 0; v < this.numVoices; v++) {
+        this.currentRatios[v] += (this.targetRatios[v] - this.currentRatios[v]) * this.portamento;
+      }
+    }
+
+    return true;
+  }
+}
+
+registerProcessor('vox-processor', VoxProcessor);
+`;
+
+/* =========================================================================
+   MAIN THREAD CONTROL
+   ========================================================================= */
+let audioCtx = null;
+let micStream = null;
+let workletNode = null;
+let analyserNode = null;
+const activeMidiNotes = new Set();
+const keyElements = new Map();
+const pointerNotes = new Map();
+
+const scopeCanvas = document.getElementById('scope');
+const scopeCtx = scopeCanvas.getContext('2d');
+let scopeData = null;
+
+const els = {
+  startBtn:      document.getElementById('startBtn'),
+  micDot:        document.getElementById('micDot'),
+  micStatus:     document.getElementById('micStatus'),
+  midiDot:       document.getElementById('midiDot'),
+  midiStatus:    document.getElementById('midiStatus'),
+  pitchReadout:  document.getElementById('pitchReadout'),
+  noteReadout:   document.getElementById('noteReadout'),
+  notesReadout:  document.getElementById('notesReadout'),
+  latencyReadout:document.getElementById('latencyReadout'),
+  keySelect:     document.getElementById('keySelect'),
+  scaleSelect:   document.getElementById('scaleSelect'),
+  autoTuneBtn:   document.getElementById('autoTuneBtn'),
+  dryGain:       document.getElementById('dryGain'),
+  tuneGain:      document.getElementById('tuneGain'),
+  harmonyGain:   document.getElementById('harmonyGain'),
+  spreadGain:    document.getElementById('spreadGain'),
+  portamento:    document.getElementById('portamento'),
+  keyboard:      document.getElementById('keyboard'),
+};
+
+function glideToPortamento(g) {
+  return 0.5 * Math.pow(0.001, g);
+}
+
+function buildKeyboard() {
+  const whiteOffsets = [0, 2, 4, 5, 7, 9, 11];
+  const blackOffsets = [1, 3, 6, 8, 10];
+  const startMidi = 60;
+  const numOctaves = 2;
+  const totalWhite = whiteOffsets.length * numOctaves;
+  const wkWidth = 100 / totalWhite;
+  let whiteIdx = 0;
+
+  for (let o = 0; o < numOctaves; o++) {
+    for (let i = 0; i < whiteOffsets.length; i++) {
+      const midi = startMidi + o * 12 + whiteOffsets[i];
+      const k = document.createElement('div');
+      k.className = 'wk';
+      k.style.left = (whiteIdx * wkWidth) + '%';
+      k.style.width = wkWidth + '%';
+      k.innerHTML = `<div class="key-label">${midiName(midi)}</div>`;
+      attachKeyEvents(k, midi);
+      els.keyboard.appendChild(k);
+      keyElements.set(midi, k);
+      whiteIdx++;
+    }
+  }
+
+  const blackAfterWhite = [0, 1, 3, 4, 5];
+  for (let o = 0; o < numOctaves; o++) {
+    for (let j = 0; j < blackAfterWhite.length; j++) {
+      const wOff = blackAfterWhite[j];
+      const midi = startMidi + o * 12 + blackOffsets[j];
+      const globalWhiteIdx = o * whiteOffsets.length + wOff;
+      const leftPct = (globalWhiteIdx + 1) * wkWidth;
+      const bkWidth = wkWidth * 0.62;
+      const k = document.createElement('div');
+      k.className = 'bk';
+      k.style.left = `calc(${leftPct}% - ${bkWidth / 2}%)`;
+      k.style.width = bkWidth + '%';
+      attachKeyEvents(k, midi);
+      els.keyboard.appendChild(k);
+      keyElements.set(midi, k);
+    }
+  }
+}
+
+function midiName(midi) {
+  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  return names[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
+}
+
+function attachKeyEvents(el, midi) {
+  el.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    el.setPointerCapture(ev.pointerId);
+    pointerNotes.set(ev.pointerId, midi);
+    dispatchNoteOn(midi);
+  });
+  const endPointer = (ev) => {
+    if (pointerNotes.has(ev.pointerId)) {
+      const n = pointerNotes.get(ev.pointerId);
+      pointerNotes.delete(ev.pointerId);
+      dispatchNoteOff(n);
+    }
+  };
+  el.addEventListener('pointerup', endPointer);
+  el.addEventListener('pointercancel', endPointer);
+  el.addEventListener('pointerleave', endPointer);
+}
+
+function dispatchNoteOn(midi) {
+  activeMidiNotes.add(midi);
+  if (keyElements.has(midi)) keyElements.get(midi).classList.add('active');
+  pushNotesToWorklet();
+  updateNotesReadout();
+}
+
+function dispatchNoteOff(midi) {
+  activeMidiNotes.delete(midi);
+  if (keyElements.has(midi)) keyElements.get(midi).classList.remove('active');
+  pushNotesToWorklet();
+  updateNotesReadout();
+}
+
+function pushNotesToWorklet() {
+  if (workletNode) {
+    workletNode.port.postMessage({ type: 'midi', notes: Array.from(activeMidiNotes) });
+  }
+}
+
+function updateNotesReadout() {
+  const arr = Array.from(activeMidiNotes).sort((a, b) => a - b);
+  els.notesReadout.textContent = arr.length ? 'Held: ' + arr.map(midiName).join(' ') : 'Held: —';
+}
+
+els.startBtn.addEventListener('click', async () => {
+  els.startBtn.disabled = true;
+  els.startBtn.textContent = 'INITIALIZING...';
+  try {
+    await startEngine();
+    els.startBtn.textContent = 'ENGINE ACTIVE';
+    drawScope();
+  } catch (err) {
+    console.error(err);
+    els.startBtn.disabled = false;
+    els.startBtn.textContent = 'START FAILED - RETRY';
+    els.micStatus.textContent = 'Error: ' + err.message;
+  }
+});
+
+async function startEngine() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  await audioCtx.resume();
+
+  const blob = new Blob([workletCode], { type: 'application/javascript' });
+  const url = URL.createObjectURL(blob);
+  await audioCtx.audioWorklet.addModule(url);
+  URL.revokeObjectURL(url);
+
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+  });
+
+  const micSource = audioCtx.createMediaStreamSource(micStream);
+
+  analyserNode = audioCtx.createAnalyser();
+  analyserNode.fftSize = 2048;
+  analyserNode.smoothingTimeConstant = 0;
+  micSource.connect(analyserNode);
+  scopeData = new Float32Array(analyserNode.fftSize);
+
+  workletNode = new AudioWorkletNode(audioCtx, 'vox-processor', {
+    numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]
+  });
+
+  workletNode.port.onmessage = (e) => {
+    if (e.data.type === 'pitch') {
+      updatePitchReadout(e.data.hz, e.data.conf);
+    }
+  };
+
+  micSource.connect(workletNode);
+  workletNode.connect(audioCtx.destination);
+
+  workletNode.port.postMessage({ type: 'key',         key: parseInt(els.keySelect.value) });
+  workletNode.port.postMessage({ type: 'scale',       scale: els.scaleSelect.value });
+  workletNode.port.postMessage({ type: 'autoTune',    on: els.autoTuneBtn.classList.contains('on') });
+  workletNode.port.postMessage({ type: 'dryGain',     value: parseFloat(els.dryGain.value) });
+  workletNode.port.postMessage({ type: 'tuneGain',    value: parseFloat(els.tuneGain.value) });
+  workletNode.port.postMessage({ type: 'harmonyGain', value: parseFloat(els.harmonyGain.value) });
+  workletNode.port.postMessage({ type: 'spreadGain',  value: parseFloat(els.spreadGain.value) });
+  workletNode.port.postMessage({ type: 'portamento',  value: glideToPortamento(parseFloat(els.portamento.value)) });
+
+  els.micDot.classList.add('active');
+  els.micStatus.textContent = 'Microphone Active';
+
+  const latency = ((audioCtx.baseLatency || 0) + (audioCtx.outputLatency || 0)) * 1000;
+  els.latencyReadout.textContent = `Latency: ~${latency.toFixed(1)} ms`;
+
+  initMIDI();
+}
+
+function updatePitchReadout(hz, conf) {
+  if (!hz || hz <= 0) {
+    els.pitchReadout.textContent = 'Pitch: -- Hz';
+    els.noteReadout.textContent  = 'Note: --';
+    return;
+  }
+  const midiFloat = 69 + 12 * Math.log2(hz / 440);
+  const midiInt = Math.round(midiFloat);
+  const cents = Math.round((midiFloat - midiInt) * 100);
+  els.pitchReadout.textContent = `Pitch: ${hz.toFixed(1)} Hz (conf ${conf.toFixed(2)})`;
+  els.noteReadout.textContent  = `Note: ${midiName(midiInt)} ${cents >= 0 ? '+' : ''}${cents}¢`;
+}
+
+function drawScope() {
+  requestAnimationFrame(drawScope);
+  if (!analyserNode) return;
+
+  const w = scopeCanvas.width  = scopeCanvas.clientWidth  * (window.devicePixelRatio || 1);
+  const h = scopeCanvas.height = scopeCanvas.clientHeight * (window.devicePixelRatio || 1);
+
+  analyserNode.getFloatTimeDomainData(scopeData);
+
+  scopeCtx.fillStyle = '#06080c';
+  scopeCtx.fillRect(0, 0, w, h);
+
+  scopeCtx.strokeStyle = '#1e293b';
+  scopeCtx.lineWidth = 1;
+  scopeCtx.beginPath();
+  scopeCtx.moveTo(0, h / 2);
+  scopeCtx.lineTo(w, h / 2);
+  scopeCtx.stroke();
+
+  let start = 0;
+  for (let i = 1; i < scopeData.length; i++) {
+    if (scopeData[i - 1] <= 0 && scopeData[i] > 0) { start = i; break; }
+  }
+
+  const visible = 512;
+  const slice = w / visible;
+
+  scopeCtx.strokeStyle = '#00ffcc';
+  scopeCtx.lineWidth = 1.5;
+  scopeCtx.beginPath();
+  for (let i = 0; i < visible; i++) {
+    const s = scopeData[(start + i) % scopeData.length];
+    const y = h / 2 - s * (h / 2) * 0.9;
+    if (i === 0) scopeCtx.moveTo(0, y);
+    else scopeCtx.lineTo(i * slice, y);
+  }
+  scopeCtx.stroke();
+}
+
+function initMIDI() {
+  if (!navigator.requestMIDIAccess) {
+    els.midiStatus.textContent = 'Web MIDI unsupported';
+    return;
+  }
+  navigator.requestMIDIAccess().then(onMIDISuccess).catch(() => {
+    els.midiStatus.textContent = 'MIDI Access Denied';
+  });
+}
+
+function onMIDISuccess(midiAccess) {
+  const bindAll = () => {
+    let connected = false;
+    midiAccess.inputs.forEach((input) => {
+      input.onmidimessage = handleMIDIMessage;
+      connected = true;
+    });
+    if (connected) {
+      els.midiDot.classList.add('active');
+      els.midiStatus.textContent = 'MIDI Connected';
+    } else {
+      els.midiStatus.textContent = 'No MIDI Controller Detected';
+    }
+  };
+  bindAll();
+  midiAccess.onstatechange = bindAll;
+}
+
+function handleMIDIMessage(msg) {
+  const cmd = msg.data[0] & 0xf0;
+  const note = msg.data[1];
+  const velocity = msg.data[2];
+
+  if (cmd === 0x90 && velocity > 0) dispatchNoteOn(note);
+  else if (cmd === 0x80 || (cmd === 0x90 && velocity === 0)) dispatchNoteOff(note);
+}
+
+els.keySelect.addEventListener('change', (e) => workletNode && workletNode.port.postMessage({ type: 'key', key: parseInt(e.target.value) }));
+els.scaleSelect.addEventListener('change', (e) => workletNode && workletNode.port.postMessage({ type: 'scale', scale: e.target.value }));
+els.autoTuneBtn.addEventListener('click', () => {
+  const on = !els.autoTuneBtn.classList.contains('on');
+  els.autoTuneBtn.classList.toggle('on', on);
+  els.autoTuneBtn.textContent = on ? 'ON' : 'OFF';
+  if (workletNode) workletNode.port.postMessage({ type: 'autoTune', on });
+});
+els.dryGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'dryGain', value: parseFloat(e.target.value) }));
+els.tuneGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'tuneGain', value: parseFloat(e.target.value) }));
+els.harmonyGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'harmonyGain', value: parseFloat(e.target.value) }));
+els.spreadGain.addEventListener('input', (e) => workletNode && workletNode.port.postMessage({ type: 'spreadGain', value: parseFloat(e.target.value) }));
+els.portamento.addEventListener('input', (e) => {
+  if (workletNode) workletNode.port.postMessage({ type: 'portamento', value: glideToPortamento(parseFloat(e.target.value)) });
+});
+
+buildKeyboard();
+</script>
+</body>
+</html>
