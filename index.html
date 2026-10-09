@@ -24,7 +24,7 @@
       -webkit-user-select: none; user-select: none;
     }
     .container {
-      width: 100%; max-width: 760px; background: var(--card);
+      width: 100%; max-width: 780px; background: var(--card);
       border-radius: 14px; padding: 24px;
       box-shadow: 0 12px 40px rgba(0,0,0,0.6);
       border: 1px solid var(--line);
@@ -131,11 +131,18 @@
 <div class="container">
   <div class="header-bar">
     <h1>SYNTHOSLEK VOX</h1>
-    <span class="badge">ZERO-GC WORKLET DSP</span>
+    <span class="badge">HIGH-PERF DSP + FX</span>
   </div>
 
-  <div style="margin-bottom: 14px;">
+  <div class="grid" style="grid-template-columns: 2fr 1fr; margin-bottom: 14px;">
     <button id="startBtn" class="primary">START AUDIO ENGINE</button>
+    <select id="presetSelect">
+      <option value="custom">Preset: Custom</option>
+      <option value="autotune_lead">Preset: Pop Auto-Tune Lead</option>
+      <option value="gospel_harmony">Preset: Gospel Chord Stack</option>
+      <option value="ethereal_space">Preset: Ethereal Reverb Space</option>
+      <option value="tight_stack">Preset: Tight Unison Stack</option>
+    </select>
   </div>
 
   <div class="grid">
@@ -218,15 +225,25 @@
     </div>
   </div>
 
-  <div class="grid">
+  <div class="grid four">
     <div class="card">
       <label>Stereo Width</label>
       <input type="range" id="spreadGain" min="0" max="1" step="0.05" value="0.7">
     </div>
     <div class="card">
-      <label>Harmony Humanize</label>
+      <label>Humanize</label>
       <button id="humanizeBtn" class="toggle on">ON</button>
-      <div class="sublabel">±3¢ detune + slight vibrato per voice</div>
+      <div class="sublabel">Detune + Vibrato</div>
+    </div>
+    <div class="card">
+      <label>Delay FX</label>
+      <input type="range" id="delayWet" min="0" max="0.8" step="0.01" value="0.15">
+      <div class="sublabel">Echo · fixed feedback</div>
+    </div>
+    <div class="card">
+      <label>Reverb FX</label>
+      <input type="range" id="reverbWet" min="0" max="0.8" step="0.01" value="0.25">
+      <div class="sublabel">Studio Chamber</div>
     </div>
   </div>
 
@@ -242,7 +259,7 @@
 
 <script>
 /* =========================================================================
-   AUDIO WORKLET PROCESSOR
+   AUDIO WORKLET PROCESSOR (OPTIMIZED DSP ENGINE — v7.1)
    ========================================================================= */
 const workletCode = `
 class VoxProcessor extends AudioWorkletProcessor {
@@ -253,7 +270,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.buffer = new Float32Array(this.bufSize);
     this.writeIdx = 0;
 
-    // Pitch detection
+    // Pitch detection buffers
     this.pitchWinSize = 2048;
     this.pitchWindow = new Float32Array(this.pitchWinSize);
     this.linearWindow = new Float32Array(this.pitchWinSize);
@@ -268,7 +285,19 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.pitchConfidence = 0;
     this.pitchLocked = false;
 
-    // Pitch shifting voices
+    // Hann lookup table
+    this.hannTableSize = 4096;
+    this.hannTable = new Float32Array(this.hannTableSize);
+    for (let i = 0; i < this.hannTableSize; i++) {
+      this.hannTable[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / this.hannTableSize));
+    }
+
+    // MIDI to frequency lookup
+    this.a4 = 440;
+    this.midiToFreq = new Float32Array(128);
+    this.updateMidiTable();
+
+    // Voice management
     this.numVoices = 6;
     this.numHarmony = this.numVoices - 1;
     this.grainSize = Math.round(sampleRate * 0.035);
@@ -279,7 +308,7 @@ class VoxProcessor extends AudioWorkletProcessor {
       this.phases[i] = i / this.numVoices;
     }
 
-    // Voice allocation (stable)
+    // Voice allocation state
     this.voiceNotes = new Int16Array(this.numHarmony).fill(-1);
     this.voiceFreq = new Float32Array(this.numHarmony);
     this.voiceVel = new Float32Array(this.numHarmony);
@@ -306,7 +335,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.envFollower = 0;
     this.gateGain = 0;
 
-    // Control state
+    // Control parameters
     this.portamento = 0.03;
     this.key = 0;
     this.scaleType = 'major';
@@ -315,7 +344,6 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.harmonyGain = 0.6;
     this.spreadGain = 0.7;
     this.autoTuneOn = false;
-    this.a4 = 440;
 
     this.scales = {
       major: [0, 2, 4, 5, 7, 9, 11],
@@ -337,10 +365,16 @@ class VoxProcessor extends AudioWorkletProcessor {
         case 'harmonyGain': this.harmonyGain = d.value; break;
         case 'spreadGain':  this.spreadGain = d.value; break;
         case 'portamento':  this.portamento = d.value; break;
-        case 'a4':          this.a4 = d.value; break;
+        case 'a4':          this.a4 = d.value; this.updateMidiTable(); break;
         case 'humanize':    this.humanizeOn = d.on; break;
       }
     };
+  }
+
+  updateMidiTable() {
+    for (let i = 0; i < 128; i++) {
+      this.midiToFreq[i] = this.a4 * Math.pow(2, (i - 69) / 12);
+    }
   }
 
   updateVoices(notes) {
@@ -478,7 +512,8 @@ class VoxProcessor extends AudioWorkletProcessor {
     if (diff > 6) diff -= 12;
     if (diff < -6) diff += 12;
 
-    return this.a4 * Math.pow(2, ((midiInt + diff) - 69) / 12);
+    const targetMidi = Math.max(0, Math.min(127, midiInt + diff));
+    return this.midiToFreq[targetMidi];
   }
 
   readVoice(v, targetRatio) {
@@ -503,14 +538,16 @@ class VoxProcessor extends AudioWorkletProcessor {
     let pos1 = (this.writeIdx - d1) % B; if (pos1 < 0) pos1 += B;
     let pos2 = (this.writeIdx - d2) % B; if (pos2 < 0) pos2 += B;
 
-    const i1 = Math.floor(pos1), f1 = pos1 - i1;
-    const i2 = Math.floor(pos2), f2 = pos2 - i2;
+    const i1 = pos1 | 0, f1 = pos1 - i1;
+    const i2 = pos2 | 0, f2 = pos2 - i2;
 
     const s1 = this.buffer[i1] * (1 - f1) + this.buffer[(i1 + 1) % B] * f1;
     const s2 = this.buffer[i2] * (1 - f2) + this.buffer[(i2 + 1) % B] * f2;
 
-    const w1 = 0.5 * (1 - Math.cos(2 * Math.PI * phi1));
-    const w2 = 0.5 * (1 - Math.cos(2 * Math.PI * phi2));
+    const idx1 = (phi1 * 4095) | 0;
+    const idx2 = (phi2 * 4095) | 0;
+    const w1 = this.hannTable[idx1];
+    const w2 = this.hannTable[idx2];
 
     return s1 * w1 + s2 * w2;
   }
@@ -526,7 +563,7 @@ class VoxProcessor extends AudioWorkletProcessor {
 
     for (let v = 0; v < this.numHarmony; v++) {
       if (this.voiceNotes[v] >= 0) {
-        this.voiceFreq[v] = this.a4 * Math.pow(2, (this.voiceNotes[v] - 69) / 12);
+        this.voiceFreq[v] = this.midiToFreq[this.voiceNotes[v]];
       }
     }
 
@@ -626,6 +663,8 @@ class VoxProcessor extends AudioWorkletProcessor {
 
       let outL = x * this.dryGain + wetL;
       let outR = x * this.dryGain + wetR;
+
+      // Smooth soft clip via tanh — no discontinuity
       outL = Math.tanh(outL);
       outR = Math.tanh(outR);
 
@@ -647,12 +686,19 @@ registerProcessor('vox-processor', VoxProcessor);
 `;
 
 /* =========================================================================
-   MAIN THREAD CONTROL
+   MAIN THREAD CONTROL & STUDIO FX CHAIN
    ========================================================================= */
 let audioCtx = null;
 let micStream = null;
 let workletNode = null;
 let analyserNode = null;
+
+let delayNode = null;
+let delayFeedback = null;
+let delayWetGain = null;
+let reverbNode = null;
+let reverbWetGain = null;
+
 const activeMidiNotes = new Map();
 const keyElements = new Map();
 const pointerNotes = new Map();
@@ -665,6 +711,7 @@ let peakHold = 0;
 
 const els = {
   startBtn:      document.getElementById('startBtn'),
+  presetSelect:  document.getElementById('presetSelect'),
   micDot:        document.getElementById('micDot'),
   micStatus:     document.getElementById('micStatus'),
   midiDot:       document.getElementById('midiDot'),
@@ -683,11 +730,22 @@ const els = {
   spreadGain:    document.getElementById('spreadGain'),
   portamento:    document.getElementById('portamento'),
   humanizeBtn:   document.getElementById('humanizeBtn'),
+  delayWet:      document.getElementById('delayWet'),
+  reverbWet:     document.getElementById('reverbWet'),
   keyboard:      document.getElementById('keyboard'),
 };
 
 function glideToPortamento(g) {
   return 0.5 * Math.pow(0.001, g);
+}
+
+// Sets a toggle button to the desired on/off state and fires the click
+// handler only if the state actually changes.
+function setToggle(el, on) {
+  const isOn = el.classList.contains('on');
+  if (isOn !== on) {
+    el.dispatchEvent(new Event('click'));
+  }
 }
 
 function buildKeyboard() {
@@ -785,6 +843,21 @@ function updateNotesReadout() {
   els.notesReadout.textContent = arr.length ? 'Held: ' + arr.map(midiName).join(' ') : 'Held: —';
 }
 
+function createReverbBuffer(ctx, duration = 2.0, decay = 2.0) {
+  const rate = ctx.sampleRate;
+  const length = rate * duration;
+  const impulse = ctx.createBuffer(2, length, rate);
+  const left = impulse.getChannelData(0);
+  const right = impulse.getChannelData(1);
+
+  for (let i = 0; i < length; i++) {
+    const n = i;
+    left[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
+    right[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
+  }
+  return impulse;
+}
+
 els.startBtn.addEventListener('click', async () => {
   els.startBtn.disabled = true;
   els.startBtn.textContent = 'INITIALIZING...';
@@ -831,9 +904,34 @@ async function startEngine() {
     }
   };
 
+  // FX chain
+  delayNode = audioCtx.createDelay();
+  delayNode.delayTime.value = 0.35;
+  delayFeedback = audioCtx.createGain();
+  delayFeedback.gain.value = 0.3;
+  delayWetGain = audioCtx.createGain();
+  delayWetGain.gain.value = parseFloat(els.delayWet.value);
+
+  delayNode.connect(delayFeedback);
+  delayFeedback.connect(delayNode);
+  delayNode.connect(delayWetGain);
+
+  reverbNode = audioCtx.createConvolver();
+  reverbNode.buffer = createReverbBuffer(audioCtx, 2.2, 2.5);
+  reverbWetGain = audioCtx.createGain();
+  reverbWetGain.gain.value = parseFloat(els.reverbWet.value);
+
+  reverbNode.connect(reverbWetGain);
+
   micSource.connect(workletNode);
   workletNode.connect(audioCtx.destination);
+  workletNode.connect(delayNode);
+  workletNode.connect(reverbNode);
 
+  delayWetGain.connect(audioCtx.destination);
+  reverbWetGain.connect(audioCtx.destination);
+
+  // Sync initial control state to worklet
   workletNode.port.postMessage({ type: 'key',         key: parseInt(els.keySelect.value) });
   workletNode.port.postMessage({ type: 'scale',       scale: els.scaleSelect.value });
   workletNode.port.postMessage({ type: 'autoTune',    on: els.autoTuneBtn.classList.contains('on') });
@@ -956,6 +1054,59 @@ function handleMIDIMessage(msg) {
   else if (cmd === 0x80 || (cmd === 0x90 && velocity === 0)) dispatchNoteOff(note);
 }
 
+// ---- Preset handler (v7.1: full state reset + toggle sync) ----
+els.presetSelect.addEventListener('change', (e) => {
+  const val = e.target.value;
+
+  if (val === 'autotune_lead') {
+    setToggle(els.autoTuneBtn, true);
+    setToggle(els.humanizeBtn, false);
+    els.dryGain.value = 0.0;
+    els.tuneGain.value = 0.9;
+    els.harmonyGain.value = 0.0;
+    els.spreadGain.value = 0.5;
+    els.portamento.value = 0.1;
+    els.delayWet.value = 0.08;
+    els.reverbWet.value = 0.10;
+  } else if (val === 'gospel_harmony') {
+    setToggle(els.autoTuneBtn, false);
+    setToggle(els.humanizeBtn, true);
+    els.dryGain.value = 0.7;
+    els.tuneGain.value = 0.0;
+    els.harmonyGain.value = 0.8;
+    els.spreadGain.value = 0.9;
+    els.portamento.value = 0.4;
+    els.delayWet.value = 0.12;
+    els.reverbWet.value = 0.20;
+  } else if (val === 'ethereal_space') {
+    setToggle(els.autoTuneBtn, false);
+    setToggle(els.humanizeBtn, true);
+    els.dryGain.value = 0.5;
+    els.tuneGain.value = 0.0;
+    els.harmonyGain.value = 0.7;
+    els.spreadGain.value = 0.8;
+    els.portamento.value = 0.6;
+    els.delayWet.value = 0.40;
+    els.reverbWet.value = 0.55;
+  } else if (val === 'tight_stack') {
+    setToggle(els.autoTuneBtn, false);
+    setToggle(els.humanizeBtn, false);
+    els.dryGain.value = 0.9;
+    els.tuneGain.value = 0.0;
+    els.harmonyGain.value = 0.7;
+    els.spreadGain.value = 0.0;
+    els.portamento.value = 0.15;
+    els.delayWet.value = 0.05;
+    els.reverbWet.value = 0.10;
+  }
+
+  // Push all slider values through the normal handlers
+  ['dryGain', 'tuneGain', 'harmonyGain', 'spreadGain', 'portamento', 'delayWet', 'reverbWet'].forEach(id => {
+    els[id].dispatchEvent(new Event('input'));
+  });
+});
+
+// ---- Control wiring ----
 els.keySelect.addEventListener('change', (e) =>
   workletNode && workletNode.port.postMessage({ type: 'key', key: parseInt(e.target.value) }));
 
@@ -998,6 +1149,14 @@ els.portamento.addEventListener('input', (e) => {
       value: glideToPortamento(parseFloat(e.target.value))
     });
   }
+});
+
+els.delayWet.addEventListener('input', (e) => {
+  if (delayWetGain) delayWetGain.gain.value = parseFloat(e.target.value);
+});
+
+els.reverbWet.addEventListener('input', (e) => {
+  if (reverbWetGain) reverbWetGain.gain.value = parseFloat(e.target.value);
 });
 
 buildKeyboard();
