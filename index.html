@@ -12,6 +12,7 @@
       --accent: #00ffcc;
       --accent-glow: rgba(0, 255, 204, 0.25);
       --warn: #ff4772;
+      --caution: #ffb347;
       --text: #e2e8f0;
       --muted: #64748b;
       --line: #1e293b;
@@ -69,6 +70,7 @@
     }
     button.primary:disabled { opacity: 0.5; cursor: default; }
     button.toggle.on { background: var(--accent); color: #000; font-weight: 800; }
+    button.toggle.on.safe { background: var(--caution); color: #000; }
     .status-dot {
       display: inline-block; width: 8px; height: 8px; border-radius: 50%;
       background: #475569; margin-right: 6px; vertical-align: middle;
@@ -103,6 +105,57 @@
       background: var(--accent);
       transition: width 0.06s linear, background 0.15s linear;
     }
+    .suppress-row {
+      display: flex; align-items: center; gap: 6px; margin-top: 6px;
+    }
+    .suppress-row .peak-label {
+      font-size: 10px; color: var(--muted); letter-spacing: 1px;
+      text-transform: uppercase; font-weight: 600;
+    }
+    .notch-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #1e293b; border: 1px solid #334155; transition: all 0.2s;
+    }
+    .notch-dot.on {
+      background: var(--caution);
+      box-shadow: 0 0 6px var(--caution);
+      border-color: var(--caution);
+    }
+
+    #advisory {
+      display: none;
+      margin-bottom: 12px;
+      padding: 12px 14px;
+      background: linear-gradient(180deg, #2a1f0a, #1e1606);
+      border: 1px solid #5a3a10;
+      border-radius: 8px;
+      color: #ffd9a3;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    #advisory.show { display: block; }
+    #advisory .adv-title {
+      font-weight: 700;
+      color: var(--caution);
+      margin-bottom: 4px;
+      letter-spacing: 0.5px;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    #advisory .adv-actions {
+      display: flex; gap: 8px; margin-top: 10px;
+    }
+    #advisory button {
+      padding: 6px 12px; font-size: 12px; font-weight: 600;
+      border-radius: 5px; cursor: pointer;
+      width: auto; flex: 0 0 auto;
+    }
+    #advisory #enableSafeBtn {
+      background: var(--caution); color: #000; border: none;
+    }
+    #advisory #dismissAdvisoryBtn {
+      background: transparent; color: #ffd9a3; border: 1px solid #5a3a10;
+    }
 
     #keyboard {
       position: relative; height: 90px; margin-top: 4px;
@@ -131,7 +184,18 @@
 <div class="container">
   <div class="header-bar">
     <h1>SYNTHOSLEK VOX</h1>
-    <span class="badge">HIGH-PERF DSP + FX</span>
+    <span class="badge">PRO DSP · v9.1</span>
+  </div>
+
+  <div id="advisory">
+    <div class="adv-title">⚠ Speaker monitoring detected</div>
+    <div>
+      Using your built-in speaker? Without headphones, the microphone can hear the speaker and create a feedback loop. Enable <b>Speaker Safe</b> to duck effects and engage the anti-feedback filter, or confirm below that you're on headphones.
+    </div>
+    <div class="adv-actions">
+      <button id="enableSafeBtn">Enable Speaker Safe</button>
+      <button id="dismissAdvisoryBtn">Using Headphones</button>
+    </div>
   </div>
 
   <div class="grid" style="grid-template-columns: 2fr 1fr; margin-bottom: 14px;">
@@ -167,7 +231,15 @@
       <div class="peak-label">Peak</div>
       <div class="peak-track"><div id="peakBar"></div></div>
     </div>
-    <div class="hint">Raw microphone signal, tapped pre-DSP. Keep peak below the amber zone for headroom.</div>
+    <div class="suppress-row">
+      <div class="peak-label" style="width: 60px;">Anti-FB</div>
+      <div class="notch-dot" id="notch0"></div>
+      <div class="notch-dot" id="notch1"></div>
+      <div class="notch-dot" id="notch2"></div>
+      <div class="notch-dot" id="notch3"></div>
+      <span class="sublabel" id="suppressorStatus">idle</span>
+    </div>
+    <div class="hint" id="calibrationHint">Peak should sit in green/low-amber at normal singing volume. Auto-calibrating input on startup…</div>
   </div>
 
   <div class="grid four">
@@ -207,6 +279,11 @@
 
   <div class="grid four">
     <div class="card">
+      <label>Input Trim</label>
+      <input type="range" id="inputTrim" min="-12" max="12" step="0.5" value="0">
+      <div class="sublabel" id="inputTrimLabel">0.0 dB</div>
+    </div>
+    <div class="card">
       <label>Dry Level</label>
       <input type="range" id="dryGain" min="0" max="1" step="0.01" value="0.8">
     </div>
@@ -218,14 +295,14 @@
       <label>Harmony Level</label>
       <input type="range" id="harmonyGain" min="0" max="1" step="0.01" value="0.6">
     </div>
+  </div>
+
+  <div class="grid four">
     <div class="card">
       <label>Glide</label>
       <input type="range" id="portamento" min="0" max="1" step="0.001" value="0.5">
       <div class="sublabel">0 = instant · 1 = slow</div>
     </div>
-  </div>
-
-  <div class="grid four">
     <div class="card">
       <label>Stereo Width</label>
       <input type="range" id="spreadGain" min="0" max="1" step="0.05" value="0.7">
@@ -236,6 +313,18 @@
       <div class="sublabel">Detune + Vibrato</div>
     </div>
     <div class="card">
+      <label>Latency Mode</label>
+      <select id="latencyMode">
+        <option value="interactive" selected>Interactive (lowest)</option>
+        <option value="balanced">Balanced</option>
+        <option value="playback">Playback (safest)</option>
+      </select>
+      <div class="sublabel">Restart engine to apply</div>
+    </div>
+  </div>
+
+  <div class="grid four">
+    <div class="card">
       <label>Delay FX</label>
       <input type="range" id="delayWet" min="0" max="0.8" step="0.01" value="0.15">
       <div class="sublabel">Echo · fixed feedback</div>
@@ -244,6 +333,16 @@
       <label>Reverb FX</label>
       <input type="range" id="reverbWet" min="0" max="0.8" step="0.01" value="0.25">
       <div class="sublabel">Studio Chamber</div>
+    </div>
+    <div class="card">
+      <label>Speaker Safe</label>
+      <button id="speakerSafeBtn" class="toggle safe">OFF</button>
+      <div class="sublabel">Duck FX &amp; harmony</div>
+    </div>
+    <div class="card">
+      <label>Anti-FB Depth</label>
+      <input type="range" id="notchDepth" min="6" max="30" step="1" value="18">
+      <div class="sublabel" id="notchDepthLabel">−18 dB · 4 slots</div>
     </div>
   </div>
 
@@ -259,7 +358,9 @@
 
 <script>
 /* =========================================================================
-   AUDIO WORKLET PROCESSOR (OPTIMIZED DSP ENGINE — v7.1)
+   AUDIO WORKLET PROCESSOR (v9.1)
+   - Pitch detection split across two process() calls (smaller CPU spike)
+   - Same total CPU as v9, effectively no per-block deadline risk
    ========================================================================= */
 const workletCode = `
 class VoxProcessor extends AudioWorkletProcessor {
@@ -270,34 +371,48 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.buffer = new Float32Array(this.bufSize);
     this.writeIdx = 0;
 
-    // Pitch detection buffers
-    this.pitchWinSize = 2048;
-    this.pitchWindow = new Float32Array(this.pitchWinSize);
+    // -------- Pitch detection (decimated, split across two ticks) --------
+    this.pitchDecim = 2;
+    this.decimSR = sampleRate / this.pitchDecim;
+    this.pitchWinSize = 1024;
+    this.decimBuffer = new Float32Array(this.pitchWinSize);
+    this.decimWriteIdx = 0;
+    this.decimAccum = 0;
+    this.decimCount = 0;
+
     this.linearWindow = new Float32Array(this.pitchWinSize);
-    this.pitchWriteIdx = 0;
     this.pitchCounter = 0;
-    this.pitchInterval = 512;
+    this.pitchInterval = 512;            // half-cycle: full detection every 1024
     this.postCounter = 0;
-    this.postDivider = 4;
-    this.maxLag = Math.min(this.pitchWinSize - 2, Math.floor(sampleRate / 65));
+    this.postDivider = 2;                // ~23 Hz post rate
+
+    this.minLag = Math.floor(this.decimSR / 800);
+    this.maxLag = Math.min(this.pitchWinSize - 2, Math.floor(this.decimSR / 65));
+    this.midLag = Math.floor((this.minLag + this.maxLag) / 2);
     this.corrMap = new Float32Array(this.maxLag + 4);
+
+    // Split-detection state
+    this.pitchPhase = 0;                 // 0 = idle, 1 = waiting to run phase 2
+    this.pitchBestLag = -1;
+    this.pitchBestCorr = 0;
+
     this.detectedPitch = 0;
     this.pitchConfidence = 0;
     this.pitchLocked = false;
 
-    // Hann lookup table
+    // Hann table
     this.hannTableSize = 4096;
     this.hannTable = new Float32Array(this.hannTableSize);
     for (let i = 0; i < this.hannTableSize; i++) {
       this.hannTable[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / this.hannTableSize));
     }
 
-    // MIDI to frequency lookup
+    // MIDI -> freq
     this.a4 = 440;
     this.midiToFreq = new Float32Array(128);
     this.updateMidiTable();
 
-    // Voice management
+    // Voices
     this.numVoices = 6;
     this.numHarmony = this.numVoices - 1;
     this.grainSize = Math.round(sampleRate * 0.035);
@@ -308,7 +423,6 @@ class VoxProcessor extends AudioWorkletProcessor {
       this.phases[i] = i / this.numVoices;
     }
 
-    // Voice allocation state
     this.voiceNotes = new Int16Array(this.numHarmony).fill(-1);
     this.voiceFreq = new Float32Array(this.numHarmony);
     this.voiceVel = new Float32Array(this.numHarmony);
@@ -318,7 +432,6 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.voiceAttack  = 0.0042;
     this.voiceRelease = 0.0005;
 
-    // Humanize
     this.humanizeOn = true;
     this.humanizePhase = new Float32Array(this.numHarmony);
     this.humanizeVibRate = new Float32Array(this.numHarmony);
@@ -330,12 +443,10 @@ class VoxProcessor extends AudioWorkletProcessor {
       this.humanizeDetune[i] = (Math.random() - 0.5) * 6;
     }
 
-    // Noise gate
     this.gateThreshold = 0.008;
     this.envFollower = 0;
     this.gateGain = 0;
 
-    // Control parameters
     this.portamento = 0.03;
     this.key = 0;
     this.scaleType = 'major';
@@ -344,6 +455,7 @@ class VoxProcessor extends AudioWorkletProcessor {
     this.harmonyGain = 0.6;
     this.spreadGain = 0.7;
     this.autoTuneOn = false;
+    this.speakerSafe = false;
 
     this.scales = {
       major: [0, 2, 4, 5, 7, 9, 11],
@@ -367,6 +479,7 @@ class VoxProcessor extends AudioWorkletProcessor {
         case 'portamento':  this.portamento = d.value; break;
         case 'a4':          this.a4 = d.value; this.updateMidiTable(); break;
         case 'humanize':    this.humanizeOn = d.on; break;
+        case 'speakerSafe': this.speakerSafe = d.on; break;
       }
     };
   }
@@ -418,36 +531,65 @@ class VoxProcessor extends AudioWorkletProcessor {
 
   detectPitch() {
     const N = this.pitchWinSize;
-    for (let i = 0; i < N; i++) {
-      this.linearWindow[i] = this.pitchWindow[(this.pitchWriteIdx + i) % N];
-    }
+    const decimSR = this.decimSR;
+    const minLag = this.minLag;
+    const maxLag = this.maxLag;
+    const midLag = this.midLag;
+    const corrMap = this.corrMap;
 
-    let mean = 0;
-    for (let i = 0; i < N; i++) mean += this.linearWindow[i];
-    mean /= N;
-    let sumSq = 0;
-    for (let i = 0; i < N; i++) {
-      this.linearWindow[i] -= mean;
-      sumSq += this.linearWindow[i] * this.linearWindow[i];
-    }
-    const rms = Math.sqrt(sumSq / N);
+    if (this.pitchPhase === 0) {
+      // ---- Phase 1: fresh snapshot + search lower half of lag range ----
+      for (let i = 0; i < N; i++) {
+        this.linearWindow[i] = this.decimBuffer[(this.decimWriteIdx + i) % N];
+      }
 
-    if (rms < 0.005) {
-      this.detectedPitch = 0;
-      this.pitchConfidence = 0;
-      this.pitchLocked = false;
+      let mean = 0;
+      for (let i = 0; i < N; i++) mean += this.linearWindow[i];
+      mean /= N;
+      let sumSq = 0;
+      for (let i = 0; i < N; i++) {
+        this.linearWindow[i] -= mean;
+        sumSq += this.linearWindow[i] * this.linearWindow[i];
+      }
+      const rms = Math.sqrt(sumSq / N);
+
+      if (rms < 0.006) {
+        this.detectedPitch = 0;
+        this.pitchConfidence = 0;
+        this.pitchLocked = false;
+        // stay in phase 0
+        return;
+      }
+
+      let bestLag = -1, bestCorr = 0;
+      for (let lag = minLag; lag <= midLag; lag++) {
+        const step = lag < 60 ? 1 : 2;
+        let c = 0, e1 = 0, e2 = 0;
+        const count = N - lag;
+        for (let i = 0; i < count; i += step) {
+          const a = this.linearWindow[i], b = this.linearWindow[i + lag];
+          c += a * b; e1 += a * a; e2 += b * b;
+        }
+        const norm = Math.sqrt(e1 * e2) + 1e-12;
+        const v = c / norm;
+        corrMap[lag] = v;
+        if (v > bestCorr) { bestCorr = v; bestLag = lag; }
+      }
+      this.pitchBestLag = bestLag;
+      this.pitchBestCorr = bestCorr;
+      this.pitchPhase = 1;
       return;
     }
 
-    const minLag = Math.floor(sampleRate / 800);
-    const maxLag = this.maxLag;
-    const corrMap = this.corrMap;
+    // ---- Phase 2: search upper half, merge, finish ----
+    let bestLag = this.pitchBestLag;
+    let bestCorr = this.pitchBestCorr;
 
-    let bestLag = -1, bestCorr = 0;
-    for (let lag = minLag; lag <= maxLag; lag += 1) {
+    for (let lag = midLag + 1; lag <= maxLag; lag++) {
+      const step = lag < 150 ? 2 : 3;
       let c = 0, e1 = 0, e2 = 0;
       const count = N - lag;
-      for (let i = 0; i < count; i += 2) {
+      for (let i = 0; i < count; i += step) {
         const a = this.linearWindow[i], b = this.linearWindow[i + lag];
         c += a * b; e1 += a * a; e2 += b * b;
       }
@@ -457,6 +599,7 @@ class VoxProcessor extends AudioWorkletProcessor {
       if (v > bestCorr) { bestCorr = v; bestLag = lag; }
     }
 
+    // Sub-harmonic octave correction
     if (bestCorr > 0.5 && bestLag > minLag * 2) {
       const halfLag = Math.round(bestLag / 2);
       let c = 0, e1 = 0, e2 = 0;
@@ -485,13 +628,15 @@ class VoxProcessor extends AudioWorkletProcessor {
       if (Math.abs(denom) > 1e-9) {
         refinedLag = bestLag + (y2 - y0) / denom;
       }
-      this.detectedPitch = sampleRate / refinedLag;
+      this.detectedPitch = decimSR / refinedLag;
       this.pitchConfidence = bestCorr;
     } else {
       this.pitchLocked = false;
       this.detectedPitch = 0;
       this.pitchConfidence = bestCorr;
     }
+
+    this.pitchPhase = 0;
   }
 
   snapToScale(freq) {
@@ -560,6 +705,7 @@ class VoxProcessor extends AudioWorkletProcessor {
 
     const B = this.bufSize;
     const blockSize = input.length;
+    const safeScale = this.speakerSafe ? 0.4 : 1.0;
 
     for (let v = 0; v < this.numHarmony; v++) {
       if (this.voiceNotes[v] >= 0) {
@@ -589,19 +735,30 @@ class VoxProcessor extends AudioWorkletProcessor {
       const x = input[i];
 
       this.buffer[this.writeIdx] = x;
-      this.pitchWindow[this.pitchWriteIdx] = x;
-      this.pitchWriteIdx = (this.pitchWriteIdx + 1) % this.pitchWinSize;
+
+      this.decimAccum += x;
+      if (++this.decimCount >= this.pitchDecim) {
+        const y = this.decimAccum / this.pitchDecim;
+        this.decimAccum = 0;
+        this.decimCount = 0;
+        this.decimBuffer[this.decimWriteIdx] = y;
+        this.decimWriteIdx = (this.decimWriteIdx + 1) % this.pitchWinSize;
+      }
 
       if (++this.pitchCounter >= this.pitchInterval) {
         this.pitchCounter = 0;
+        const wasPhase2 = (this.pitchPhase === 1);
         this.detectPitch();
-        if (++this.postCounter >= this.postDivider) {
-          this.postCounter = 0;
-          this.port.postMessage({
-            type: 'pitch',
-            hz: this.detectedPitch,
-            conf: this.pitchConfidence
-          });
+        // Only post after a fresh full detection cycle (i.e., phase 2 just ran)
+        if (wasPhase2) {
+          if (++this.postCounter >= this.postDivider) {
+            this.postCounter = 0;
+            this.port.postMessage({
+              type: 'pitch',
+              hz: this.detectedPitch,
+              conf: this.pitchConfidence
+            });
+          }
         }
       }
 
@@ -646,7 +803,7 @@ class VoxProcessor extends AudioWorkletProcessor {
 
           const ratio = (this.voiceFreq[v] / this.detectedPitch) * this.humanizeMult[v];
           if (ratio > 0.25 && ratio < 4.0) {
-            const gain = this.harmonyGain * this.voiceEnv[v] * this.voiceVel[v];
+            const gain = this.harmonyGain * this.voiceEnv[v] * this.voiceVel[v] * safeScale;
             const vSamp = this.readVoice(v + 1, ratio) * gain;
             const pan = (activeHarmony > 1
               ? (activeIdx / (activeHarmony - 1) - 0.5)
@@ -663,8 +820,6 @@ class VoxProcessor extends AudioWorkletProcessor {
 
       let outL = x * this.dryGain + wetL;
       let outR = x * this.dryGain + wetR;
-
-      // Smooth soft clip via tanh — no discontinuity
       outL = Math.tanh(outL);
       outR = Math.tanh(outR);
 
@@ -686,18 +841,47 @@ registerProcessor('vox-processor', VoxProcessor);
 `;
 
 /* =========================================================================
-   MAIN THREAD CONTROL & STUDIO FX CHAIN
+   MAIN THREAD
    ========================================================================= */
 let audioCtx = null;
 let micStream = null;
 let workletNode = null;
 let analyserNode = null;
+let trimGain = null;
 
 let delayNode = null;
 let delayFeedback = null;
 let delayWetGain = null;
 let reverbNode = null;
 let reverbWetGain = null;
+let fxDuckGain = null;
+
+// Anti-feedback
+const NUM_NOTCHES = 4;
+let notchFilters = [];
+let feedbackAnalyser = null;
+let feedbackFreqData = null;
+let feedbackNotchState = [];
+let lastFeedbackCheck = 0;
+const FEEDBACK_CHECK_INTERVAL_MS = 150;
+const FEEDBACK_HITS_TO_ENGAGE = 3;
+const FEEDBACK_MISSES_TO_RELEASE = 20;
+const FEEDBACK_PEAK_DB_THRESHOLD = -42;
+const FEEDBACK_PEAK_CONTRAST_DB = 6;
+const FEEDBACK_MATCH_HZ = 40;
+
+// Auto-trim
+let autoTrimActive = false;
+let autoTrimPeak = 0;
+let autoTrimStartMs = 0;
+let userAdjustedTrim = false;
+let autoTrimApplying = false;
+const AUTO_TRIM_WINDOW_MS = 2000;
+const AUTO_TRIM_TARGET = 0.25;   // ~-12 dBFS
+
+// Advisory
+let advisoryShown = false;
+let headphoneConfirmed = false;
 
 const activeMidiNotes = new Map();
 const keyElements = new Map();
@@ -708,10 +892,25 @@ const scopeCtx = scopeCanvas.getContext('2d');
 const peakBar = document.getElementById('peakBar');
 let scopeData = null;
 let peakHold = 0;
+let lastScopeDraw = 0;
+
+const notchDots = [
+  document.getElementById('notch0'),
+  document.getElementById('notch1'),
+  document.getElementById('notch2'),
+  document.getElementById('notch3'),
+];
+const suppressorStatusEl = document.getElementById('suppressorStatus');
+const notchDepthLabel = document.getElementById('notchDepthLabel');
+const inputTrimLabel = document.getElementById('inputTrimLabel');
+const calibrationHint = document.getElementById('calibrationHint');
 
 const els = {
   startBtn:      document.getElementById('startBtn'),
   presetSelect:  document.getElementById('presetSelect'),
+  advisory:      document.getElementById('advisory'),
+  enableSafeBtn: document.getElementById('enableSafeBtn'),
+  dismissBtn:    document.getElementById('dismissAdvisoryBtn'),
   micDot:        document.getElementById('micDot'),
   micStatus:     document.getElementById('micStatus'),
   midiDot:       document.getElementById('midiDot'),
@@ -724,6 +923,7 @@ const els = {
   scaleSelect:   document.getElementById('scaleSelect'),
   autoTuneBtn:   document.getElementById('autoTuneBtn'),
   a4Ref:         document.getElementById('a4Ref'),
+  inputTrim:     document.getElementById('inputTrim'),
   dryGain:       document.getElementById('dryGain'),
   tuneGain:      document.getElementById('tuneGain'),
   harmonyGain:   document.getElementById('harmonyGain'),
@@ -732,6 +932,9 @@ const els = {
   humanizeBtn:   document.getElementById('humanizeBtn'),
   delayWet:      document.getElementById('delayWet'),
   reverbWet:     document.getElementById('reverbWet'),
+  speakerSafeBtn:document.getElementById('speakerSafeBtn'),
+  notchDepth:    document.getElementById('notchDepth'),
+  latencyMode:   document.getElementById('latencyMode'),
   keyboard:      document.getElementById('keyboard'),
 };
 
@@ -739,15 +942,140 @@ function glideToPortamento(g) {
   return 0.5 * Math.pow(0.001, g);
 }
 
-// Sets a toggle button to the desired on/off state and fires the click
-// handler only if the state actually changes.
 function setToggle(el, on) {
   const isOn = el.classList.contains('on');
-  if (isOn !== on) {
-    el.dispatchEvent(new Event('click'));
+  if (isOn !== on) el.dispatchEvent(new Event('click'));
+}
+
+function dbToLin(db) { return Math.pow(10, db / 20); }
+
+async function detectOutputType() {
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (_) {}
+  const outputs = devices.filter(d => d.kind === 'audiooutput');
+  const labelled = outputs.filter(d => d.deviceId !== 'default' && d.deviceId !== 'communications');
+  const headphoneLike = labelled.some(d => /head|ear|bud|usb|bluetooth|bt\b|wire/i.test(d.label));
+  if (headphoneLike) return { probablySpeaker: false };
+  if (isMobile) return { probablySpeaker: true };
+  return { probablySpeaker: false };
+}
+
+function initFeedbackSuppressor() {
+  feedbackNotchState = [];
+  for (let i = 0; i < NUM_NOTCHES; i++) {
+    feedbackNotchState.push({ freq: 0, hits: 0, misses: 0, engaged: false });
+  }
+  notchDots.forEach(d => d.classList.remove('on'));
+  suppressorStatusEl.textContent = 'idle';
+}
+
+function runFeedbackSuppressor() {
+  if (!feedbackAnalyser || !audioCtx) return;
+
+  const now = performance.now();
+  if (now - lastFeedbackCheck < FEEDBACK_CHECK_INTERVAL_MS) return;
+  lastFeedbackCheck = now;
+
+  feedbackAnalyser.getFloatFrequencyData(feedbackFreqData);
+
+  const sampleRate = audioCtx.sampleRate;
+  const binHz = sampleRate / feedbackAnalyser.fftSize;
+  const N = feedbackFreqData.length;
+
+  const peaks = [];
+  for (let i = 3; i < N - 3; i++) {
+    const v = feedbackFreqData[i];
+    if (v < FEEDBACK_PEAK_DB_THRESHOLD) continue;
+    if (v <= feedbackFreqData[i - 1]) continue;
+    if (v <= feedbackFreqData[i + 1]) continue;
+    if (v < feedbackFreqData[i - 3] + FEEDBACK_PEAK_CONTRAST_DB) continue;
+    if (v < feedbackFreqData[i + 3] + FEEDBACK_PEAK_CONTRAST_DB) continue;
+    peaks.push({ freq: i * binHz, db: v });
+  }
+
+  const refreshed = new Set();
+  for (let n = 0; n < NUM_NOTCHES; n++) {
+    const track = feedbackNotchState[n];
+    if (track.freq === 0) continue;
+    for (const p of peaks) {
+      if (Math.abs(p.freq - track.freq) < FEEDBACK_MATCH_HZ) {
+        track.hits++;
+        track.misses = 0;
+        track.freq = track.freq * 0.85 + p.freq * 0.15;
+        refreshed.add(n);
+        break;
+      }
+    }
+  }
+
+  for (let n = 0; n < NUM_NOTCHES; n++) {
+    const track = feedbackNotchState[n];
+    if (track.freq === 0) continue;
+    if (refreshed.has(n)) continue;
+    track.misses++;
+    if (track.misses > FEEDBACK_MISSES_TO_RELEASE) {
+      track.freq = 0; track.hits = 0; track.misses = 0;
+      if (track.engaged) {
+        track.engaged = false;
+        notchFilters[n].gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+      }
+    }
+  }
+
+  for (const p of peaks) {
+    let tracked = false;
+    for (let n = 0; n < NUM_NOTCHES; n++) {
+      if (feedbackNotchState[n].freq > 0 &&
+          Math.abs(feedbackNotchState[n].freq - p.freq) < FEEDBACK_MATCH_HZ) {
+        tracked = true; break;
+      }
+    }
+    if (tracked) continue;
+    for (let n = 0; n < NUM_NOTCHES; n++) {
+      if (feedbackNotchState[n].freq === 0) {
+        feedbackNotchState[n].freq = p.freq;
+        feedbackNotchState[n].hits = 1;
+        feedbackNotchState[n].misses = 0;
+        break;
+      }
+    }
+  }
+
+  const depthDb = -Math.abs(parseFloat(els.notchDepth.value));
+  let engagedCount = 0;
+  for (let n = 0; n < NUM_NOTCHES; n++) {
+    const track = feedbackNotchState[n];
+    if (track.freq > 0 && track.hits >= FEEDBACK_HITS_TO_ENGAGE) {
+      notchFilters[n].frequency.setTargetAtTime(track.freq, audioCtx.currentTime, 0.04);
+      notchFilters[n].Q.setTargetAtTime(28, audioCtx.currentTime, 0.04);
+      notchFilters[n].gain.setTargetAtTime(depthDb, audioCtx.currentTime, 0.04);
+      track.engaged = true;
+      engagedCount++;
+      notchDots[n].classList.add('on');
+    } else {
+      notchDots[n].classList.remove('on');
+    }
+  }
+
+  suppressorStatusEl.textContent = engagedCount > 0
+    ? `active (${engagedCount})`
+    : (peaks.length > 0 ? 'scanning…' : 'idle');
+}
+
+function setSpeakerSafe(on) {
+  const btn = els.speakerSafeBtn;
+  btn.classList.toggle('on', on);
+  btn.textContent = on ? 'ON' : 'OFF';
+  if (fxDuckGain && audioCtx) {
+    fxDuckGain.gain.setTargetAtTime(on ? 0.35 : 1.0, audioCtx.currentTime, 0.05);
+  }
+  if (workletNode) {
+    workletNode.port.postMessage({ type: 'speakerSafe', on });
   }
 }
 
+/* ---------- Keyboard ---------- */
 function buildKeyboard() {
   const whiteOffsets = [0, 2, 4, 5, 7, 9, 11];
   const blackOffsets = [1, 3, 6, 8, 10];
@@ -849,7 +1177,6 @@ function createReverbBuffer(ctx, duration = 2.0, decay = 2.0) {
   const impulse = ctx.createBuffer(2, length, rate);
   const left = impulse.getChannelData(0);
   const right = impulse.getChannelData(1);
-
   for (let i = 0; i < length; i++) {
     const n = i;
     left[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
@@ -858,6 +1185,7 @@ function createReverbBuffer(ctx, duration = 2.0, decay = 2.0) {
   return impulse;
 }
 
+/* ---------- Engine ---------- */
 els.startBtn.addEventListener('click', async () => {
   els.startBtn.disabled = true;
   els.startBtn.textContent = 'INITIALIZING...';
@@ -865,6 +1193,7 @@ els.startBtn.addEventListener('click', async () => {
     await startEngine();
     els.startBtn.textContent = 'ENGINE ACTIVE';
     drawScope();
+    maybeShowAdvisory();
   } catch (err) {
     console.error(err);
     els.startBtn.disabled = false;
@@ -874,7 +1203,16 @@ els.startBtn.addEventListener('click', async () => {
 });
 
 async function startEngine() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  const latencyHint = els.latencyMode.value || 'interactive';
+
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      latencyHint,
+      sampleRate: 48000
+    });
+  } catch (_) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint });
+  }
   await audioCtx.resume();
 
   const blob = new Blob([workletCode], { type: 'application/javascript' });
@@ -883,7 +1221,13 @@ async function startEngine() {
   URL.revokeObjectURL(url);
 
   micStream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+      sampleRate: 48000
+    }
   });
 
   const micSource = audioCtx.createMediaStreamSource(micStream);
@@ -893,6 +1237,31 @@ async function startEngine() {
   analyserNode.smoothingTimeConstant = 0;
   micSource.connect(analyserNode);
   scopeData = new Float32Array(analyserNode.fftSize);
+
+  trimGain = audioCtx.createGain();
+  trimGain.gain.value = dbToLin(parseFloat(els.inputTrim.value));
+  micSource.connect(trimGain);
+
+  feedbackAnalyser = audioCtx.createAnalyser();
+  feedbackAnalyser.fftSize = 2048;
+  feedbackAnalyser.smoothingTimeConstant = 0;
+  feedbackFreqData = new Float32Array(feedbackAnalyser.frequencyBinCount);
+  trimGain.connect(feedbackAnalyser);
+
+  notchFilters = [];
+  let prevNode = trimGain;
+  for (let i = 0; i < NUM_NOTCHES; i++) {
+    const nf = audioCtx.createBiquadFilter();
+    nf.type = 'peaking';
+    nf.frequency.value = 1000;
+    nf.Q.value = 28;
+    nf.gain.value = 0;
+    prevNode.connect(nf);
+    prevNode = nf;
+    notchFilters.push(nf);
+  }
+
+  initFeedbackSuppressor();
 
   workletNode = new AudioWorkletNode(audioCtx, 'vox-processor', {
     numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]
@@ -904,7 +1273,6 @@ async function startEngine() {
     }
   };
 
-  // FX chain
   delayNode = audioCtx.createDelay();
   delayNode.delayTime.value = 0.35;
   delayFeedback = audioCtx.createGain();
@@ -920,18 +1288,19 @@ async function startEngine() {
   reverbNode.buffer = createReverbBuffer(audioCtx, 2.2, 2.5);
   reverbWetGain = audioCtx.createGain();
   reverbWetGain.gain.value = parseFloat(els.reverbWet.value);
-
   reverbNode.connect(reverbWetGain);
 
-  micSource.connect(workletNode);
+  fxDuckGain = audioCtx.createGain();
+  fxDuckGain.gain.value = 1.0;
+  delayWetGain.connect(fxDuckGain);
+  reverbWetGain.connect(fxDuckGain);
+  fxDuckGain.connect(audioCtx.destination);
+
+  prevNode.connect(workletNode);
   workletNode.connect(audioCtx.destination);
   workletNode.connect(delayNode);
   workletNode.connect(reverbNode);
 
-  delayWetGain.connect(audioCtx.destination);
-  reverbWetGain.connect(audioCtx.destination);
-
-  // Sync initial control state to worklet
   workletNode.port.postMessage({ type: 'key',         key: parseInt(els.keySelect.value) });
   workletNode.port.postMessage({ type: 'scale',       scale: els.scaleSelect.value });
   workletNode.port.postMessage({ type: 'autoTune',    on: els.autoTuneBtn.classList.contains('on') });
@@ -942,14 +1311,33 @@ async function startEngine() {
   workletNode.port.postMessage({ type: 'portamento',  value: glideToPortamento(parseFloat(els.portamento.value)) });
   workletNode.port.postMessage({ type: 'a4',          value: parseFloat(els.a4Ref.value) });
   workletNode.port.postMessage({ type: 'humanize',    on: els.humanizeBtn.classList.contains('on') });
+  workletNode.port.postMessage({ type: 'speakerSafe', on: els.speakerSafeBtn.classList.contains('on') });
 
   els.micDot.classList.add('active');
   els.micStatus.textContent = 'Microphone Active';
 
   const latency = ((audioCtx.baseLatency || 0) + (audioCtx.outputLatency || 0)) * 1000;
-  els.latencyReadout.textContent = `Latency: ~${latency.toFixed(1)} ms`;
+  const sr = audioCtx.sampleRate;
+  els.latencyReadout.textContent = `Latency: ~${latency.toFixed(1)} ms @ ${(sr/1000).toFixed(1)} kHz`;
+
+  // Kick off auto-trim
+  autoTrimActive = true;
+  autoTrimPeak = 0;
+  autoTrimStartMs = performance.now();
+  autoTrimApplying = false;
+  userAdjustedTrim = false;
+  calibrationHint.textContent = 'Auto-calibrating input for 2 s — sing or speak normally at performance volume…';
 
   initMIDI();
+}
+
+async function maybeShowAdvisory() {
+  if (advisoryShown) return;
+  advisoryShown = true;
+  if (headphoneConfirmed) return;
+  if (els.speakerSafeBtn.classList.contains('on')) return;
+  const { probablySpeaker } = await detectOutputType();
+  if (probablySpeaker) els.advisory.classList.add('show');
 }
 
 function updatePitchReadout(hz, conf) {
@@ -966,9 +1354,14 @@ function updatePitchReadout(hz, conf) {
   els.noteReadout.textContent  = `Note: ${midiName(midiInt)} ${cents >= 0 ? '+' : ''}${cents}¢`;
 }
 
-function drawScope() {
+function drawScope(ts) {
   requestAnimationFrame(drawScope);
   if (!analyserNode) return;
+
+  if (ts - lastScopeDraw < 33) return;
+  lastScopeDraw = ts;
+
+  runFeedbackSuppressor();
 
   const w = scopeCanvas.width  = scopeCanvas.clientWidth  * (window.devicePixelRatio || 1);
   const h = scopeCanvas.height = scopeCanvas.clientHeight * (window.devicePixelRatio || 1);
@@ -980,6 +1373,28 @@ function drawScope() {
     const a = Math.abs(scopeData[i]);
     if (a > peak) peak = a;
   }
+
+  // ---- Auto-trim: track peak during the calibration window ----
+  if (autoTrimActive) {
+    if (peak > autoTrimPeak) autoTrimPeak = peak;
+    if (performance.now() - autoTrimStartMs > AUTO_TRIM_WINDOW_MS) {
+      autoTrimActive = false;
+      if (!userAdjustedTrim && autoTrimPeak > 0.02 && autoTrimPeak < 0.98) {
+        const targetGainLin = AUTO_TRIM_TARGET / autoTrimPeak;
+        const targetDb = Math.max(-12, Math.min(6, 20 * Math.log10(targetGainLin)));
+        autoTrimApplying = true;
+        els.inputTrim.value = targetDb.toFixed(1);
+        els.inputTrim.dispatchEvent(new Event('input'));
+        autoTrimApplying = false;
+        calibrationHint.textContent =
+          `Auto-trim set to ${targetDb >= 0 ? '+' : ''}${targetDb.toFixed(1)} dB ` +
+          `(peak was ${(20*Math.log10(autoTrimPeak)).toFixed(1)} dBFS). Adjust Input Trim if needed.`;
+      } else {
+        calibrationHint.textContent = 'Peak should sit in the green/low-amber at normal singing volume. Adjust Input Trim if needed.';
+      }
+    }
+  }
+
   peakHold = Math.max(peak, peakHold * 0.92);
   const pct = Math.min(1, peakHold * 1.2);
   peakBar.style.width = (pct * 100) + '%';
@@ -1049,12 +1464,45 @@ function handleMIDIMessage(msg) {
   const cmd = msg.data[0] & 0xf0;
   const note = msg.data[1];
   const velocity = msg.data[2];
-
   if (cmd === 0x90 && velocity > 0) dispatchNoteOn(note, velocity);
   else if (cmd === 0x80 || (cmd === 0x90 && velocity === 0)) dispatchNoteOff(note);
 }
 
-// ---- Preset handler (v7.1: full state reset + toggle sync) ----
+/* ---------- UI wiring ---------- */
+els.enableSafeBtn.addEventListener('click', () => {
+  setSpeakerSafe(true);
+  els.advisory.classList.remove('show');
+});
+els.dismissBtn.addEventListener('click', () => {
+  headphoneConfirmed = true;
+  els.advisory.classList.remove('show');
+  els.dismissBtn.textContent = 'Using Headphones ✓';
+});
+
+els.speakerSafeBtn.addEventListener('click', () => {
+  const on = !els.speakerSafeBtn.classList.contains('on');
+  setSpeakerSafe(on);
+});
+
+els.notchDepth.addEventListener('input', (e) => {
+  const db = parseInt(e.target.value);
+  notchDepthLabel.textContent = `−${db} dB · ${NUM_NOTCHES} slots`;
+  for (let n = 0; n < NUM_NOTCHES; n++) {
+    if (feedbackNotchState[n] && feedbackNotchState[n].engaged && audioCtx) {
+      notchFilters[n].gain.setTargetAtTime(-Math.abs(db), audioCtx.currentTime, 0.04);
+    }
+  }
+});
+
+els.inputTrim.addEventListener('input', (e) => {
+  if (!autoTrimApplying) userAdjustedTrim = true;
+  const db = parseFloat(e.target.value);
+  inputTrimLabel.textContent = (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
+  if (trimGain && audioCtx) {
+    trimGain.gain.setTargetAtTime(dbToLin(db), audioCtx.currentTime, 0.03);
+  }
+});
+
 els.presetSelect.addEventListener('change', (e) => {
   const val = e.target.value;
 
@@ -1100,13 +1548,11 @@ els.presetSelect.addEventListener('change', (e) => {
     els.reverbWet.value = 0.10;
   }
 
-  // Push all slider values through the normal handlers
   ['dryGain', 'tuneGain', 'harmonyGain', 'spreadGain', 'portamento', 'delayWet', 'reverbWet'].forEach(id => {
     els[id].dispatchEvent(new Event('input'));
   });
 });
 
-// ---- Control wiring ----
 els.keySelect.addEventListener('change', (e) =>
   workletNode && workletNode.port.postMessage({ type: 'key', key: parseInt(e.target.value) }));
 
@@ -1158,6 +1604,19 @@ els.delayWet.addEventListener('input', (e) => {
 els.reverbWet.addEventListener('input', (e) => {
   if (reverbWetGain) reverbWetGain.gain.value = parseFloat(e.target.value);
 });
+
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    if (headphoneConfirmed) return;
+    detectOutputType().then(({ probablySpeaker }) => {
+      if (probablySpeaker && !els.speakerSafeBtn.classList.contains('on')) {
+        els.advisory.classList.add('show');
+      } else {
+        els.advisory.classList.remove('show');
+      }
+    });
+  });
+}
 
 buildKeyboard();
 </script>
